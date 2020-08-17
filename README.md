@@ -56,56 +56,69 @@ Archive structure:
 ### My First Level
 
 Open poom-sdk level folder:
-![docs/open_dir.png]
+
+![Open Directory](docs/open_dir.png)
 
 Open the maps folder from Slade:
-![docs/open_maps.png]
+
+![Open Maps](docs/open_maps.png)
 
 Create a new map (say E1M3) using UDMF format.
 > maps must be named ExMx
-![docs/map_type.png]
 
-> make sure to set the base archive to poom
-![docs/map_base_archive.png]
+![Map Type](docs/map_type.png)
+
+Set the base archive to POOM (to use main game resources)
+
+![Base Archive](docs/map_base_archive.png)
 
 From the map editor, select the "Draw Shape" option (defaults to rectangle), create a new room:
-![docs/create_room.png]
+
+![Create Room](docs/create_room.png)
 
 Select all four walls and assign "middle" texture:
-![docs/set_middle_texture.png]
+
+![Texture](docs/set_middle_texture.png)
 
 Switch to sector mode and assign floor and ceiling textures:
-![docs/sector_textures.png]
+
+![Sector Textures](docs/sector_textures.png)
 
 Check level using 3d view:
-![docs/3d_view.png]
+
+![3d view](docs/3d_view.png)
 
 Save level under: _repo location_/maps
 
 Slade3 will display the settings window to get ZBSP compiler path. This is a good time to fill it with your own path:
-![docs/zbsp_settings.png]
+
+![ZBSP Settings](docs/zbsp_settings.png)
 
 Switch to "Things" mode to set player's starting location. Right click inside the room:
-![docs/create_thing.png]
+
+![Create Thing](docs/create_thing.png)
 
 Edit thing type (should not be necessary as first thing created by Slade is player's location):
-[!docs/player_settings.png]
+
+![Player Settings](docs/player_settings.png)
 
 Select thing ID 1 (e.g. POOM guy!):
-[!docs/select_poomguy.png]
+
+![Select POOMGuy](docs/select_poomguy.png)
 
 ### Texturing
-All wall textures must be stored inside a single image. The tileset can be up to 1024x128 pixels.
+All wall textures must be stored as single image. The tileset can be up to 1024x128 pixels.
 
 The toolkit automatically converts tileset into unique 8x8 tiles. 
 > The tileset cannot contain more than 128 unique tiles.
 
 Example tileset:
-![graphics/TILES.png]
 
-Resulting tiles:
-![docs/tiles.png]
+![Tileset](graphics/TILES.png)
 
+Resulting PICO8 tiles:
+
+![In Game Tiles](docs/tiles.png)
 
 ### Palettes
 
@@ -117,19 +130,21 @@ The game support 2 palettes:
 
 Must be a 16x16 image using *only* colors from row 0 of pain palette.
 
-Ex:
-![graphics/PLAYPAL.png]
+Default palette:
+
+![Game palette](docs/playpal.png)
 
 #### Pain Palette
 
 Must be a 16x16 image - can use any PICO8 colors (inc. secret colors).
 
-Ex:
-![graphics/PAINPAL.png]
+Default palette:
 
-Row 0 is the default game palette.
+![Pain palette](docs/painpal.png)
 
-Tip: use @Kometbomb [Fade Generator](http://kometbomb.net/pico8/fadegen.html) to produce pain palette!
+Column 0 is the game palette.
+
+> Tip: use @Kometbomb [Fade Generator](http://kometbomb.net/pico8/fadegen.html) to produce pain palette!
 
 ### Sector Specials
 
@@ -151,6 +166,10 @@ The following triggers are supported:
 ### Animated Triggers
 
 ## Monsters & Props
+
+The DECORATE file describes everything the player will find in the game (monsters, keys, medkits, props...). Each entry is an **actor**. An actor on the map is a **thing** (e.g. a thing always references an actor).
+
+
 
 ### Standard Classes
 
