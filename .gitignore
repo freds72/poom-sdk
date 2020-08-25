@@ -7,3 +7,5 @@ activity_log.txt
 /cdata
 sdl_controllers.txt
 *.bak
+/.env
+/env

@@ -18,7 +18,9 @@ Level building and monster logic uses standard DOOM concepts & editors and is fu
 
 # Credits
 
-Zdoom Wiki (outstanding content)
+Original assets - Id Software (Bethesda)
+
+ZDoom Wiki (outstanding content folks!)
 
 # Getting Started
 ## Pre-Requisites
@@ -28,17 +30,54 @@ Zdoom Wiki (outstanding content)
 * [Slade 3](https://slade.mancubus.net/) to edit levels
 * [ZBSP](https://zdoom.org/files/utils/zdbsp/zdbsp-1.19.zip) to produce UDMF files from levels
 
-## Run Poom
-1. Fork this repo
-2. Open a Python command prompt at repo location, run:
-```
-compile.pex .. poom
-```
-The command generate a game the sample level included in SDK.
-3. Launch game:
-```
-pico8 -home <path to repo> poom.p8
-```
+## Install Toolchain
+1. Clone repo
+2. Open a Python command prompt at repo location
+3. (optional) Create a Python virtual env:
+    ```shell
+    python -m venv env
+    sandbox/script/activate
+    ```
+4. Install WAD compiler:
+    ```shell
+    pip install tools/wad_reader-0.1.tar.gz
+    ```
+5. Validate install
+    ```shell
+    python -m wad_reader
+    ```
+    Expected output:
+    ```
+    usage: wad_reader.py [-h] pico carts mod map
+
+    positional arguments:
+      pico        full path to PICO8 folder
+      carts       path to carts folder where game is exported
+      mod         game cart name (ex: poom)
+      map         map name to compile (ex: E1M1)
+
+    optional arguments:
+      -h, --help  show this help message and exit
+    ```
+
+## Compile & Run Poom
+1. Open a Python command prompt at repo location (e.g. where DECORATE file is)
+2. (optional) Enable Python virtual env
+3. Generate a PICO8 multi-cart game with a sample level in carts folder:
+
+    ```shell
+    python -m wad_reader <path to PICO8> <path to carts folder> <mod name> <map name>
+    ```
+    Example:
+    ```
+    cd poom-sdk
+    python -m wad_reader d:\pico-8_0.2.0 poom E1M1
+    ```
+
+4. Launch game:
+    ```
+    pico8 -home <path to repo> poom.p8
+    ```
 
 # Make a Game!
 ## Level Building
@@ -106,8 +145,33 @@ Select thing ID 1 (e.g. POOM guy!):
 
 ![Select POOMGuy](docs/select_poomguy.png)
 
-### Texturing
-All wall textures must be stored as single image. The tileset can be up to 1024x128 pixels.
+## Sector Specials
+
+The following sector behaviors are supported:
+
+| ID | Type | Description |
+|----|:----:|:----------:|
+| 65 | Light Flicker | Random light flicker |
+| 69 | 10 Damage | 10 HP every 15 ticks |
+| 71 | 5 Damage | 5 HP every 15 ticks |
+| 80 | 20 Damage | 20 HP every 15 ticks |
+| 115 | Instadeath | Kills any actor touching sector floor |
+
+## Line Specials
+
+The following triggers are supported:
+| ID | Type | Description |
+|----|:----:|:----------:|
+| 202 | Generic Door | Lower/raise sector ceiling. See: [Generic Door](https://zdoom.org/wiki/Generic_Door) |
+| 64 | Platform Up/Down/Stay | Lower/raise sector floor. See: [Platform Up/Down/Stay](https://zdoom.org/wiki/Plat_UpWaitDownStay) |
+| 112 | Light Change | Set sector light. See: [Light Change To Value](https://zdoom.org/wiki/Light_ChangeToValue)
+
+### Animated Triggers
+
+# Graphics
+
+## Flats
+All wall & floors textures (aka "flats") must be stored as single image. The tileset can be up to 1024x128 pixels.
 
 The toolkit automatically converts tileset into unique 8x8 tiles. 
 > The tileset cannot contain more than 128 unique tiles.
@@ -120,13 +184,45 @@ Resulting PICO8 tiles:
 
 ![In Game Tiles](docs/tiles.png)
 
-### Palettes
+### Creating New Texture
+
+Edit the tileset picture using your favorite paint program. Make sure to use *only* colors from the game palette, save file.
+
+From Slade, launch the texture editor:
+
+![Texture Editor](docs/open_texture.png)
+
+Create a new texture:
+
+![New Texture](docs/new_texture.png)
+
+Specify texture name (to be used in editor) and size (in pixels):
+
+![Texture Settings](docs/texture_params.png)
+
+Attach a patch (e.g. source image) to the texture:
+
+> make sure to use the full path option to locate the tileset
+
+![Patch Selection](docs/patch_selection.png)
+
+Move the texture area over the correct patch location:
+
+![Patch](docs/adjust_patch.png)
+
+> Adjust texture scale to 0.5/0.5 to match in-game scale.
+
+Save.
+
+The texture is now available in level editor!
+
+## Palettes
 
 The game support 2 palettes:
 * Game palette - used to shade textures & things
 * Pain palette - used to fade to red screen when player gets hit
 
-#### Game Palette
+### Game Palette
 
 Must be a 16x16 image using *only* colors from row 0 of pain palette.
 
@@ -134,7 +230,7 @@ Default palette:
 
 ![Game palette](docs/playpal.png)
 
-#### Pain Palette
+### Pain Palette
 
 Must be a 16x16 image - can use any PICO8 colors (inc. secret colors).
 
@@ -146,32 +242,126 @@ Column 0 is the game palette.
 
 > Tip: use @Kometbomb [Fade Generator](http://kometbomb.net/pico8/fadegen.html) to produce pain palette!
 
-### Sector Specials
 
-The following sector behaviors are supported:
+## Game Title
 
-| ID | Type | Description |
-|----|:----:|:----------:|
-| 65 | Light Flicker | Random light flicker |
+Game title is packaged from graphics/m_title.png image.
 
-### Line Specials
+![Title Image](graphics/m_title.png)
 
-The following triggers are supported:
-| ID | Type | Description |
-|----|:----:|:----------:|
-| 202 | Generic Door | Lower/raise sector ceiling. See: [Generic Door](https://zdoom.org/wiki/Generic_Door) |
-| 64 | Platform Up/Down/Stay | Lower/raise sector floor. See: [Platform Up/Down/Stay](https://zdoom.org/wiki/Plat_UpWaitDownStay) |
-| 112 | Light Change | Set sector light. See: [Light Change To Value](https://zdoom.org/wiki/Light_ChangeToValue)
+> Image must be 128x32
 
-### Animated Triggers
+> Image must use standard PICO8 palette
 
-## Monsters & Props
+# Monsters & Props
 
 The DECORATE file describes everything the player will find in the game (monsters, keys, medkits, props...). Each entry is an **actor**. An actor on the map is a **thing** (e.g. a thing always references an actor).
 
+## Syntax
+```
+actor classname [ : parentclassname] [doomednum]
+{
+  properties
+  flags
+  states
+}
+```
+
+* classname
+
+  The name this new actor is referenced by in the game. While ZDoom will accept a much larger range of values for the name, this should for best compatibility be a valid identifier (alphanumeric plus underscores, but not starting with a digit).
+* parentclassname
+
+  The name of a parent class this new actor inherits its attributes from (optional). If none is specified, the parent class is Actor.
+  
+* doomednum
+
+  Editor number for this actor (optional). This is the number used to distinguish the actor from other things in map. If the actor is intended to be placed in a map editor, it should have an editor number. The actual number value is generally arbitrary but should avoid conflicting with already used numbers.
+
+An actor definition consists of properties, flags and state definitions. In the state definitions you can call Action functions.
+
+Actor properties and flags define the general behavior of an actor.
+
+States define the various sprite animations of an actor.
+
+Action functions (also known as "code pointers") cause the actor to perform some particular action when the frame that calls them is shown. They form the basis of almost all enemy and weapon behavior in the game. Instead of using one of the special action functions you can also use almost any action special that is available in ACS.
+
+Comments are supported. Both types of C-style comments (// to end of line, and /* to */) are allowed. While not part of the specification, certain editing tools, such as Doom Builder and SLADE 3, make use of specific comments for special purposes, these usually start with //$.
+
+## Standard Classes
+
+The following actors are built-in parent class names:
+
+### key
+```
+actor key {
+    amount 1
+    maxamount 1
+    radius 20
+  }
+```
+### ammo
+```
+actor ammo {
+    radius 20
+  }
+```
+### health
+```
+actor health {
+    maxamount 200
+    radius 20
+  }
+```
+### armor
+```
+actor ammo {
+    maxamount 200
+    radius 20
+  }
+```
+### weapon
+```
+actor weapon {
+    radius 20
+    amount 0
+    maxamount 1
+  }
+```
+
+### player
+```
+actor player {
+    radius 32
+    armor 100
+    health 100
+    speed 3
+    +SHOOTABLE
+    +SOLID
+  }
+```
+### monster
+```
+actor monster {
+    radius 20
+    armor 0
+    health 50
+    +SHOOTABLE
+    +SOLID
+  }
+```
+### projectile
+```
+actor projectile {
+    damage 1
+    speed 5
+    +NOGRAVITY
+    +MISSILE
+  }
+```
 
 
-### Standard Classes
+
 
 
 
