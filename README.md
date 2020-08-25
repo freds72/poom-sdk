@@ -247,7 +247,7 @@ Column 0 is the game palette.
 
 Game title is packaged from graphics/m_title.png image.
 
-![Title Image](graphics/m_title.png)
+![Title Image](graphics/M_TITLE.png)
 
 > Image must be 128x32
 
