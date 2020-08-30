@@ -79,6 +79,32 @@ ZDoom Wiki (outstanding content folks!)
     pico8 -home <path to repo> poom.p8
     ```
 
+# Controls
+
+## Player 1 keys
+
+⬇️⬆️: back/forward
+
+⬅️➡️: turn left/right
+
+🅾️ + ⬅️➡️: strafe
+
+🅾️ + ⬇️⬆️: switch weapon
+
+❎: fire
+
+## Player 1 + 2 keys
+
+> use keyconfig to map second player keys
+
+WASD or local variant: back/forward/strafe
+
+⬅️➡️: turn left/right
+
+🅾️ + ⬇️⬆️: switch weapon
+
+❎: fire
+
 # Make a Game!
 ## Level Building
 
