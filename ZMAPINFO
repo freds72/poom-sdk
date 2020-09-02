@@ -1,0 +1,13 @@
+map E1M1 "Hangar"
+{
+	levelnum = 1
+	next = "E1M2"
+	music = 0
+}
+
+map E1M2 "Docks"
+{
+	levelnum = 2
+	next = "endgame"
+	music = 12
+}

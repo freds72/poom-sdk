@@ -40,24 +40,24 @@ ZDoom Wiki (outstanding content folks!)
     ```
 4. Install WAD compiler:
     ```shell
-    pip install tools/wad_reader-0.1.tar.gz
+    pip install tools/wad_reader-<latest version>.tar.gz
     ```
 5. Validate install
     ```shell
-    python -m wad_reader
+    python -m wad_reader --help
     ```
     Expected output:
-    ```
-    usage: wad_reader.py [-h] pico carts mod map
-
-    positional arguments:
-      pico        full path to PICO8 folder
-      carts       path to carts folder where game is exported
-      mod         game cart name (ex: poom)
-      map         map name to compile (ex: E1M1)
+    ```shell
+    usage: wad_reader.py [-h] --pico-home PICO_HOME --carts-path CARTS_PATH --mod-name MOD_NAME [--map MAP]
 
     optional arguments:
-      -h, --help  show this help message and exit
+      -h, --help            show this help message and exit
+      --pico-home PICO_HOME
+                            full path to PICO8 folder
+      --carts-path CARTS_PATH
+                            path to carts folder where game is exported
+      --mod-name MOD_NAME   game cart name (ex: poom)
+      --map MAP             map name to compile (ex: E1M1)    
     ```
 
 ## Compile & Run Poom
@@ -65,19 +65,19 @@ ZDoom Wiki (outstanding content folks!)
 2. (optional) Enable Python virtual env
 3. Generate a PICO8 multi-cart game with a sample level in carts folder:
 
-    ```shell
-    python -m wad_reader <path to PICO8> <path to carts folder> <mod name> <map name>
-    ```
-    Example:
-    ```
-    cd poom-sdk
-    python -m wad_reader d:\pico-8_0.2.0 poom E1M1
-    ```
+```shell
+python -m wad_reader --pico-home <path to PICO8> --carts-path <path to carts folder> --mod-name <mod name> --map E1M1
+```
+Example:
+```shell
+cd poom-sdk
+python -m wad_reader --pico-home d:\pico-8_0.2.0 --carts-path carts --mod-name poom --map E1M1
+```
 
 4. Launch game:
-    ```
-    pico8 -home <path to repo> poom.p8
-    ```
+```shell
+pico8 -home <path to repo> poom.p8
+```
 
 # Controls
 
@@ -176,7 +176,7 @@ Select thing ID 1 (e.g. POOM guy!):
 The following sector behaviors are supported:
 
 | ID | Type | Description |
-|----|:----:|:----------:|
+|----|:----:|:-----------:|
 | 65 | Light Flicker | Random light flicker |
 | 69 | 10 Damage | 10 HP every 15 ticks |
 | 71 | 5 Damage | 5 HP every 15 ticks |
@@ -278,6 +278,21 @@ Game title is packaged from graphics/m_title.png image.
 > Image must be 128x32
 
 > Image must use standard PICO8 palette
+
+# Maps
+
+The ZMAPINFO file contains the list of map metadata (name, music...).
+
+The file syntax is:
+```
+map <maplump> <nice name> { properties }
+```
+where supported properties are:
+| property | Type | Description |
+|----------|:----:|:-----------:|
+|levelnum  | integer | level sequence. Only required to mark first level |
+|next | string | lump name of next level|
+|music | integer | background music identifier |
 
 # Monsters & Props
 
