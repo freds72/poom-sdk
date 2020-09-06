@@ -1,9 +1,10 @@
 # POOM SDK
 This repository contains everything required to produce a DOOM-like using PICO8, featuring:
 * Complex geometry (slanted walls, stairs, doors...)
-* Textured floors & walls (inc. transparent walls, animated triggers)
+* Textured floors & walls (inc. animated triggers)
 * Lightning (blinking sectors, light triggers)
 * 8 sided sprites for monsters & props
+* Data driven monsters & props
 * Triggers (opening/closing doors)
 * Keys
 * Multiple weapons (bullets & projectiles)
@@ -117,6 +118,7 @@ Archive structure:
 * :page_facing_up: PAINPAL pain palette ramp
 * :page_facing_up: DECORATE define actors & behaviors
 * :page_facing_up: TEXTURES defines floor & wall textures
+* :page_facing_up: ZMAPINFO defines map options & sequence
 
 ### My First Level
 
@@ -200,7 +202,7 @@ The following triggers are supported:
 All wall & floors textures (aka "flats") must be stored as single image. The tileset can be up to 1024x128 pixels.
 
 The toolkit automatically converts tileset into unique 8x8 tiles. 
-> The tileset cannot contain more than 128 unique tiles.
+> The tileset cannot contain more than 127 unique tiles.
 
 Example tileset:
 
@@ -210,7 +212,7 @@ Resulting PICO8 tiles:
 
 ![In Game Tiles](docs/tiles.png)
 
-### Creating New Texture
+### Creating New Textures
 
 Edit the tileset picture using your favorite paint program. Make sure to use *only* colors from the game palette, save file.
 
@@ -241,6 +243,10 @@ Move the texture area over the correct patch location:
 Save.
 
 The texture is now available in level editor!
+
+### Texture Switches
+
+Line triggers (ex: open door button) will automatically switch between textures named xxx_ON/xxx_OFF
 
 ## Palettes
 
@@ -294,17 +300,51 @@ where supported properties are:
 |next | string | lump name of next level|
 |music | integer | background music identifier |
 
+Example:
+```C
+map E1M1 "Hangar"
+{
+	levelnum = 1
+	next = "E1M2"
+	music = 0
+}
+
+map E1M2 "Docks"
+{
+  // optional
+	levelnum = 2
+	next = "endgame"
+	music = 12
+}
+```
+
 # Monsters & Props
 
 The DECORATE file describes everything the player will find in the game (monsters, keys, medkits, props...). Each entry is an **actor**. An actor on the map is a **thing** (e.g. a thing always references an actor).
 
 ## Syntax
-```
+```C
 actor classname [ : parentclassname] [doomednum]
 {
   properties
   flags
   states
+}
+```
+
+Example: light pole
+```C
+actor Column 2028
+{
+ Radius 16
+ Height 30
+ +SOLID
+ States
+ {
+	Spawn:
+	 LIGH A -1
+	 Stop
+ }
 }
 ```
 
