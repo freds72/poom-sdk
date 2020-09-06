@@ -297,8 +297,8 @@ where supported properties are:
 | property | Type | Description |
 |----------|:----:|:-----------:|
 |levelnum  | integer | level sequence. Only required to mark first level |
-|next | string | lump name of next level|
-|music | integer | background music identifier |
+|next | string | lump name of next level. Use ```"endgame"``` to move to game over screen|
+|music | integer | (optional) background music identifier. See [Music & Sound]() section |
 
 Example:
 ```C
@@ -440,6 +440,20 @@ actor projectile {
     +MISSILE
   }
 ```
+# Music & Sound
+
+Music and sound is totally modable.
+Sound is stored in:
+```
+carts/music.p8
+```
+This file can be modified as needed. music+sfx sections will be merged with main gamecart at compile time.
+
+## Reserved Sounds
+
+The following sound effects ID are reserved for game engine use:
+- 62: blocked button/door sound
+- 63: door & platform open/close
 
 
 

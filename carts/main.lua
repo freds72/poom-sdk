@@ -728,6 +728,8 @@ function with_physic(thing)
                 -- fix position & velocity
                 v2_add(self,move_dir,fix_move.t-radius)
                 velocity={0,0,0}
+                -- explosion sound (if any)
+                if(actor.deathsound) sfx(actor.deathsound)
                 -- death state
                 self:jump_to(5)
                 -- hit thing
@@ -960,7 +962,7 @@ function attach_plyr(thing,actor,skill)
       local active_wp=wp[wp_slot]
       local frame,light=active_wp.state,self.sector.lightlevel
       
-      -- active_wp:draw_vm(64,64)
+      -- sector light affects weapon sprite
       light=frame[3] and 8 or min((light*15)\1,15)
       memcpy(0x5f00,0x4300|light<<4,16)          
 
@@ -972,6 +974,13 @@ function attach_plyr(thing,actor,skill)
       printb(ammotype.icon..self.inventory[ammotype],106,120,9)
       printb("♥"..self.health,2,110,12)
       printb("웃"..self.armor,2,120,3)
+
+      -- keys
+      for item,amount in pairs(self.inventory) do
+        if amount>0 and item.slot then
+          printb(item.icon,106,120-item.slot*10,item.hudcolor)
+        end
+      end
 
       -- set "pain" palette (defaults to screen palette if normal)
       memcpy(0x5f10,0x4400|hit_ttl<<4,16)
@@ -1150,6 +1159,7 @@ function play_state(skill,map_id)
   if not _actors then
     _actors,_sprite_cache=unpack_actors()
   end
+  -- fix garbage sprites when loading 2nd map
   _sprite_cache:clear()
 
   -- ammo scaling factor
@@ -1171,6 +1181,9 @@ function play_state(skill,map_id)
   assert(_plyr,"missing player in level")
 
   _cam=make_camera()
+
+  -- start level music (if any)
+  music(_maps_music[map_id])
 
   return 
     -- update
@@ -1331,21 +1344,14 @@ end
 
 -->8
 -- unpack map
-local cart_progress,cart_id,mem=0
+local cart_id,mem=0
 function mpeek()
 	if mem==0x4300 then
-		cart_progress=0
     cart_id+=1
 		reload(0,0,0x4300,mod_name.."_"..cart_id..".p8")
 		mem=0
 	end
-	local v=peek(mem)
-	if mem%779==0 then
-		cart_progress+=1
-    
-    rectfill(0,120,shl(cart_progress,4),127,cart_id%2==0 and 1 or 7)
-		flip()
-  end
+	local v=@mem
 	mem+=1
 	return v
 end
@@ -1392,11 +1398,11 @@ function unpack_special(special,line,sectors,actors)
     return function(thing)
       -- need lock?
       if actorlock then
-        local inventory=thing.inventory
-        -- keep key in inventory
-        if not inventory[actorlock] then 
+        -- keep key in inventory (for reusable locked doors)
+        if not thing.inventory[actorlock] then 
           _msg="need key"
-          -- todo: err sound
+          -- play "err" sound
+          sfx(62)
           return
         end
       end
@@ -1428,6 +1434,9 @@ function unpack_special(special,line,sectors,actors)
     end)
     local speed,kind,delay,lock=mpeek(),mpeek(),mpeek(),unpack_variant()
     local function move_async(to,speed)
+      -- play open/close sound
+      sfx(63)
+
       -- take current values
       local ceils={}
       for _,sector in pairs(doors) do
@@ -1470,7 +1479,10 @@ function unpack_special(special,line,sectors,actors)
     -- backup initial height
     local orig_floor=sector.floor
     local function move_async(from,to)
+      -- todo: configurable wait time
       wait_async(30)
+      -- play open/close sound
+      sfx(63)
       for i=0,speed do
         sector.floor=lerp(from,to,smoothstep(i/speed))
         yield()
@@ -1581,11 +1593,11 @@ function unpack_actors()
           actor=self,
           health=self.health,
           armor=self.armor,
-          -- for player only
-          weapons=weapons,
           active_slot=active_slot,
           -- pickable things
-          pickup=self.pickup,          
+          pickup=self.pickup,  
+          -- ****************** 
+          -- decorate vm engine       
           -- goto vm label
           jump_to=function(self,label)
             i,ticks=state_labels[label],-2
@@ -1614,13 +1626,19 @@ function unpack_actors()
           end
         },{__index=thing})
 
-        -- clone startup inventory
-        if inventory then
-          thing.inventory={}
-          for k,v in pairs(inventory) do
-            thing.inventory[k]=v
+        local function clone(coll,name)
+          if coll then
+            thing[name]={}
+            for k,v in pairs(coll) do
+              thing[name][k]=v
+            end  
           end
         end
+
+        -- clone startup inventory
+        clone(inventory,"inventory")
+        -- clone weapons (to avoid changing actor definition)
+        clone(weapons,"weapons")
 
         return thing
       end
@@ -1632,6 +1650,7 @@ function unpack_actors()
       {0x0.0002,"armor"},
       {0x0.0004,"amount"},
       {0x0.0008,"maxamount"},
+      -- convert icon code into character
       {0x0.0010,"icon",function() return chr(mpeek()) end},
       {0x0.0020,"slot",mpeek},
       {0x0.0040,"ammouse"},
@@ -1639,13 +1658,18 @@ function unpack_actors()
       {0x0.0100,"damage"},
       {0x0.0200,"ammotype",unpack_actor_ref},
       {0x0.0800,"mass"},
+      -- some actor have multiple sounds (weapon for ex.)
+      {0x0.1000,"pickupsound"},
+      {0x0.2000,"attacksound"},
+      {0x0.4000,"hudcolor"},
+      {0x0.8000,"deathsound"},
       {0x0.0400,"",function()
         -- 
         unpack_array(function()
           local startitem,amount=unpack_actor_ref(),unpack_variant()
           if startitem.kind==2 then
             -- weapon
-            if(not weapons) weapons={}
+            weapons=weapons or {}
             -- create a new "dummy" thing
             local weapon_thing=startitem:attach({})
             weapons[startitem.slot]=weapon_thing
@@ -1671,7 +1695,7 @@ function unpack_actors()
     local function pickup(owner,ref,qty,maxqty)
       ref=ref or item
       owner[ref]=min((owner[ref] or 0)+(qty or item.amount),maxqty or item.maxamount)
-      if(item.sound) sfx(item.sound)
+      if(item.pickupsound) sfx(item.pickupsound)
     end
     
     if kind==0 then
@@ -1798,13 +1822,14 @@ function unpack_actors()
       end,
       -- A_WeaponReady
       function()
-        local ammouse,ammotype=item.ammouse,item.ammotype
         return function(weapon)
           if btn(❎) then
             local inventory=weapon.owner.inventory
-            local newqty=inventory[ammotype]-ammouse
+            local newqty=inventory[item.ammotype]-item.ammouse
             if newqty>=0 then
-              inventory[ammotype]=newqty
+              inventory[item.ammotype]=newqty
+              -- play attack sound
+              if(item.attacksound) sfx(item.attacksound)
               -- fire state
               weapon:jump_to(9)
             end
