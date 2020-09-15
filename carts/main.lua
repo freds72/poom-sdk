@@ -5,7 +5,7 @@ __lua__
 -- globals
 local _bsp,_cam,_plyr,_things,_sprite_cache,_actors
 local _onoff_textures={}
-local _ambientlight,_znear,_ammo_factor=0,16,1
+local _ambientlight,_znear,_ammo_factor=0,8,1
 local _msg
 
 --local k_far,k_near=0,2
@@ -52,7 +52,7 @@ function make_camera()
         local ax,az=(m1*x+m3*z+m4)<<1,m9*x+m11*z+m12
         -- todo: optimize?
         local code=2
-        if(az>16) code=0
+        if(az>_znear) code=0
         if(az>854) code|=1
         if(ax>az) code|=4
         if(-ax>az) code|=8
@@ -403,7 +403,7 @@ function draw_flats(v_cache,segs,things)
         m1*x+m3*z+m4,
         m9*x+m11*z+m12
       local code=2
-      if(az>16) code=0
+      if(az>_znear) code=0
       if(az>854) code|=1
       -- fov adjustment
       if(-2*ax>az) code|=4
@@ -496,7 +496,10 @@ function find_ssector_thick(node,pos,radius,res)
 end
 
 -- http://geomalgorithms.com/a13-_intersect-4.html
-function intersect_sub_sector(segs,p,d,tmin,tmax,res,skipthings)
+-- returns an array of hits
+-- t: impact depth (to fix velocity)
+-- ti: impact on velocity vector
+function intersect_sub_sector(segs,p,d,tmin,tmax,radius,res,skipthings)
   local _tmax=tmax
   local px,pz,dx,dz,tmax_seg=p[1],p[2],d[1],d[2]
 
@@ -509,7 +512,7 @@ function intersect_sub_sector(segs,p,d,tmin,tmax,res,skipthings)
       -- not dead
       if actor.flags&0x4==0 and not thing.dead and thing.subs[segs] then
         -- overflow 'safe' coordinates
-        local m,r={(px-thing[1])>>8,(pz-thing[2])>>8},actor.radius>>8
+        local m,r={(px-thing[1])>>8,(pz-thing[2])>>8},(actor.radius+radius)>>8
         local b,c=v2_dot(m,d),v2_dot(m,m)-r*r
 
         -- check distance and ray direction vs. circle
@@ -529,7 +532,7 @@ function intersect_sub_sector(segs,p,d,tmin,tmax,res,skipthings)
                 prev,head=head,head.next
               end
               -- insert new thing
-              prev.next={t=t,thing=thing,next=prev.next}
+              prev.next={ti=t,t=(radius-t)/radius,thing=thing,next=prev.next}
             end
           end
         end
@@ -545,25 +548,34 @@ function intersect_sub_sector(segs,p,d,tmin,tmax,res,skipthings)
 
   for _,s0 in ipairs(segs) do
     local n=s0[5]
-    local denom,dist=v2_dot(n,d),s0[6]-v2_dot(n,p)
+    local denom,dist_a=v2_dot(n,d),s0[6]-v2_dot(n,p)
     if denom==0 then
       -- parallel and outside
-      if(dist<0) return
+      if(dist_a<0) return
     else
-      local t=dist/denom
+      local t=dist_a/denom
       -- within seg?
       local pt={
         px+t*dx,
         pz+t*dz
       }
       local d=v2_dot(s0[2],pt)-s0[3]
-      if d>=0 and d<s0[4] then
+      -- extended segment
+      if d>=-radius and d<s0[4]+radius then
+        -- moving away
         if denom<0 then
           if(t>tmin) tmin=t
           if(tmin>tmax) return
-        else
-          if(t<tmax) tmax=t tmax_seg=s0
-          if(tmax<tmin) return 
+        else -- moving in
+          local dist_b=s0[6]-v2_dot(n,{px+_tmax*dx,pz+_tmax*dz})
+          if s0.line and (dist_a<radius or dist_b<radius) then
+            add(res,{ti=t,t=mid((dist_a-1/32)/(dist_a-dist_b),0,1),seg=s0,n=n})
+          end
+          -- exact segment
+          if d>=0 and d<s0[4] then
+            if(t<tmax) tmax=t tmax_seg=s0
+            if(tmax<tmin) return 
+          end
         end
       end 
     end
@@ -571,14 +583,13 @@ function intersect_sub_sector(segs,p,d,tmin,tmax,res,skipthings)
 
   if tmin<=tmax and tmax_seg then
     -- don't record node compiler lines
-    if(tmax_seg.line) add(res,{t=tmax,seg=tmax_seg,n=tmax_seg[5]})
+    -- if(tmax_seg.line) add(res,{t=tmax,seg=tmax_seg,n=tmax_seg[5]})
     -- any remaining segment to check?
-    if(tmax<_tmax and tmax_seg.partner) intersect_sub_sector(tmax_seg.partner,p,d,tmax,_tmax,res,skipthings)
+    if(tmax<_tmax and tmax_seg.partner) intersect_sub_sector(tmax_seg.partner,p,d,tmax,_tmax,radius,res,skipthings)
   end
 end
 
 -- returns distance and normal to target (if visible)
--- note: always return normalized target vector
 function line_of_sight(thing,otherthing,maxdist)
   local n,d=v2_normal(v2_make(thing,otherthing))
   -- in radius?
@@ -586,7 +597,7 @@ function line_of_sight(thing,otherthing,maxdist)
   if d<maxdist then
     -- line of sight?
     local h,hits,blocking=thing[3]+24,{}
-    intersect_sub_sector(thing.ssector,thing,n,0,d,hits,true)
+    intersect_sub_sector(thing.ssector,thing,n,0,d,0,hits,true)
     for _,hit in pairs(hits) do
       -- bsp hit?
       local ldef=hit.seg.line
@@ -624,7 +635,7 @@ function make_thing(actor,x,y,z,angle)
    -- all sub-sectors that thing touches
   -- used for rendering and collision detection
   local subs,pos={},{x,y}
-  find_ssector_thick(_bsp,pos,actor.radius,subs)
+  find_ssector_thick(_bsp,pos,actor.radius/2,subs)
   -- default height & sector specs
   local ss=find_sub_sector(_bsp,pos)
   -- attach instance properties to new thing
@@ -677,82 +688,80 @@ function with_physic(thing)
       -- check collision with world
       local move_dir,move_len,hits=v2_normal(velocity)
       
-      if move_len>0.001 then
+      if move_len>1/32 then
         local h=self[3]
         hits={}
         -- player: check intersection w/ additional contact radius
-        intersect_sub_sector(ss,self,move_dir,0,move_len+radius+(is_player and 24 or 0),hits)    
+        intersect_sub_sector(ss,self,move_dir,0,move_len,radius,hits)    
         -- fix position
         local stair_h=is_missile and 0 or 24
         for _,hit in ipairs(hits) do
           -- skip "front colliders"
-          if hit.t<move_len+radius then
-            local fix_move
-            if hit.seg then
-              -- bsp hit?
-              local ldef=hit.seg.line
-              local otherside=ldef[not hit.seg.side]
+          local fix_move
+          if hit.seg then
+            -- bsp hit?
+            local ldef=hit.seg.line
+            local otherside=ldef[not hit.seg.side]
 
-              if otherside==nil or 
-                -- impassable
-                (not is_missile and ldef.flags&0x40>0) or
-                h+height>otherside.sector.ceil or 
-                h+stair_h<otherside.sector.floor then
-                fix_move=hit
-              end
-              
-              -- cross special?
-              -- todo: supports monster activated triggers
-              if is_player and ldef.trigger and ldef.flags&0x10>0 then
-                ldef.trigger(self)
-              end
-            elseif hit.thing!=self then
-              -- thing hit?
-              local otherthing=hit.thing
-              local otheractor=otherthing.actor
-              if is_player and otherthing.pickup then
-                -- avoid reentrancy
-                otherthing.pickup=nil
-                -- jump to pickup state
-                otherthing:jump_to(10)
-                otheractor.pickup(otherthing,self)
-              elseif otheractor.flags&0x1>0 then
-                -- solid actor?
-                fix_move=hit
-                fix_move.n=v2_normal(v2_make(self,otherthing))
-              end
+            if otherside==nil or 
+              -- impassable
+              (not is_missile and ldef.flags&0x40>0) or
+              h+height>otherside.sector.ceil or 
+              h+stair_h<otherside.sector.floor then
+              fix_move=hit
             end
+            
+            -- cross special?
+            -- todo: supports monster activated triggers
+            if is_player and ldef.trigger and ldef.flags&0x10>0 then
+              ldef.trigger(self)
+            end
+          elseif hit.thing!=self then
+            -- thing hit?
+            local otherthing=hit.thing
+            local otheractor=otherthing.actor
+            if is_player and otherthing.pickup then
+              -- avoid reentrancy
+              otherthing.pickup=nil
+              -- jump to pickup state
+              otherthing:jump_to(10)
+              otheractor.pickup(otherthing,self)
+            elseif otheractor.flags&0x1>0 then
+              -- solid actor?
+              fix_move=hit
+              fix_move.n=v2_normal(v2_make(self,otherthing))
+            end
+          end
 
-            if fix_move then
-              if is_missile then
-                -- fix position & velocity
-                v2_add(self,move_dir,fix_move.t-radius)
-                velocity={0,0,0}
-                -- explosion sound (if any)
-                if(actor.deathsound) sfx(actor.deathsound)
-                -- death state
-                self:jump_to(5)
-                -- hit thing
-                local otherthing=fix_move.thing
-                if(otherthing and otherthing.hit) otherthing:hit(actor.damage,move_dir,self.owner)
-                -- stop at first wall/thing
-                break
-              else
-                local n=fix_move.n
-                local fix=(fix_move.t-radius)*v2_dot(n,move_dir)
-                -- avoid being pulled toward prop/wall
-                if fix<0 then
-                  -- apply impulse (e.g. fix velocity)
-                  v2_add(velocity,n,fix)
-                end
+          if fix_move then
+            if is_missile then
+              -- fix position & velocity
+              v2_add(self,move_dir,fix_move.t)
+              velocity={0,0,0}
+              -- explosion sound (if any)
+              if(actor.deathsound) sfx(actor.deathsound)
+              -- death state
+              self:jump_to(5)
+              -- hit thing
+              local otherthing=fix_move.thing
+              if(otherthing and otherthing.hit) otherthing:hit(actor.damage,move_dir,self.owner)
+              -- stop at first wall/thing
+              break
+            else
+              local n=fix_move.n
+              local fix=-fix_move.t*v2_dot(n,velocity)
+              -- avoid being pulled toward prop/wall
+              if fix<0 then
+                -- apply impulse (e.g. fix velocity)
+                v2_add(velocity,n,fix)
               end
             end
           end
         end
-
+              
         -- apply move
         v2_add(self,velocity)
-              
+
         -- refresh sector after fixed collision
         ss=find_sub_sector(_bsp,self)
         self.sector=ss.sector
@@ -760,16 +769,20 @@ function with_physic(thing)
 
         -- refresh overlapping sectors
         local subs={}
-        find_ssector_thick(_bsp,self,radius,subs)
+        find_ssector_thick(_bsp,self,radius/2,subs)
         self.subs=subs
+      else
+        velocity[1]=0
+        velocity[2]=0
       end
+
       -- triggers?
       -- check triggers/bumps/...
       if is_player then
         if not hits then
           local angle=self.angle
           hits={}
-          intersect_sub_sector(ss,self,{cos(angle),-sin(angle)},0,radius+24,hits)    
+          intersect_sub_sector(ss,self,{cos(angle),-sin(angle)},0,radius+24,0,hits)    
         end
         for _,hit in ipairs(hits) do
           if hit.seg then
@@ -1104,6 +1117,9 @@ function make_menu(title,options,fn)
     [2]=1,
     [1]=0},1
   
+  -- stop music (if any)
+  music(-1,250)
+  
   return 
     -- update
     function()
@@ -1165,8 +1181,8 @@ function play_state(skill,map_id)
   -- ammo scaling factor
   _ammo_factor=split"2,1,1,1"[skill]
   _bsp,thingdefs=unpack_map(skill,_actors,_maps_cart[map_id],_maps_offset[map_id])
-  -- reset active things
-  _things,_plyr={}
+  -- reset misc things
+  _ambientlight,_things,_plyr=0,{}
 
   -- attach behaviors to things
   for _,thingdef in pairs(thingdefs) do 
@@ -1748,7 +1764,7 @@ function unpack_actors()
           for i=1,bullets do
             local angle=owner.angle+(rnd(2*xspread)-xspread)/360
             local hits,move_dir={},{cos(angle),-sin(angle)}
-            intersect_sub_sector(owner.ssector,owner,move_dir,owner.actor.radius/2,1024,hits)    
+            intersect_sub_sector(owner.ssector,owner,move_dir,owner.actor.radius/2,1024,0,hits)    
             -- todo: get from actor properties
             local h=owner[3]+32
             for _,hit in ipairs(hits) do
@@ -1779,7 +1795,7 @@ function unpack_actors()
               if fix_move then
                 -- actual hit position
                 local pos={owner[1],owner[2],h}
-                v2_add(pos,move_dir,fix_move.t)
+                v2_add(pos,move_dir,fix_move.ti)
                 local puffthing=make_thing(puff,pos[1],pos[2],0,angle)
                 -- todo: get height from properties
                 -- todo: improve z setting
