@@ -175,7 +175,7 @@ Select thing ID 1 (e.g. POOM guy!):
 
 ## Sector Specials
 
-The following sector behaviors are supported:
+The following sector "special" behaviors are supported:
 
 | ID | Type | Description |
 |----|:----:|:-----------:|
@@ -183,6 +183,7 @@ The following sector behaviors are supported:
 | 69 | 10 Damage | 10 HP every 15 ticks |
 | 71 | 5 Damage | 5 HP every 15 ticks |
 | 80 | 20 Damage | 20 HP every 15 ticks |
+| 84 | 5 Damage + Scroll East | 5 HP every 15 ticks + floor texture scrolling |
 | 115 | Instadeath | Kills any actor touching sector floor |
 
 ## Line Specials
