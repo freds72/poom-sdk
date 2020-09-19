@@ -5,8 +5,8 @@ __lua__
 -- globals
 local _bsp,_cam,_plyr,_things,_sprite_cache,_actors
 local _onoff_textures={}
-local _ambientlight,_znear,_ammo_factor=0,8,1
-local _msg
+local _ambientlight,_znear,_ammo_factor,_intersectid,_msg=0,8,1,0
+local _ui_funcs,_wp_ui={circfill,rectfill,print},split"1,1,63,90,12,2,0,1,2,19,86,49,94,0,1,3,⬅️,52,88,5,0,1,3,shotgun,21,88,11,0,2,2,77,86,111,94,0,2,3,➡️,68,88,5,0,2,3,chaingun,79,88,11,0,3,2,50,68,76,76,0,3,3,⬆️,60,80,5,0,3,3,rocket,52,70,11,0,4,2,50,104,76,112,0,4,3,⬇️,60,96,5,0,4,3,plasma,52,106,11,0"
 
 --local k_far,k_near=0,2
 --local k_right,k_left=4,8
@@ -15,7 +15,6 @@ local _msg
 memcpy(0x4300,0x1000,512)
 
 function make_camera()
-  local shkx,shky=0,0  
   return {
     m=split"1,0,0,0,1,0",
     u=1,
@@ -30,17 +29,6 @@ function make_camera()
         -height,
         sa,ca,-sa*pos[1]-ca*pos[2]
       }
-    end,
-    shake=function()
-      shkx,shky=min(1,shkx+rnd()),min(1,shky+rnd())
-    end,
-    update=function()
-      shkx*=-0.7-rnd(0.2)
-      shky*=-0.7-rnd(0.2)
-      if abs(shkx)<0.5 and abs(shky)<0.5 then
-        shkx,shky=0,0
-      end
-      camera(shkx,shky)  
     end,
     is_visible=function(self,bbox)    
       local outcode,m1,m3,m4,_,m9,m11,m12=0xffff,unpack(self.m)
@@ -135,7 +123,6 @@ function vspr(frame,sx,sy,scale,flipx)
   palt(tc,true)
   local sw,xscale=xoffset*scale,flipx and -scale or scale
   sx-=sw
-	if(flipx) sx+=sw  
 	sy-=yoffset*scale
 	for i,tile in pairs(tiles) do
     local dx,dy,ssx,ssy=sx+(i%w)*xscale,sy+(i\w)*scale,_sprite_cache:use(tile)
@@ -234,8 +221,7 @@ end
 function polyfill(v,xoffset,yoffset,tex,light)
   poke4(0x5f38,tex)
 
-  -- todo: get proper player height
-  local ca,sa,cx,cy,cz=_cam.u,_cam.v,(_plyr[1]>>4)+xoffset,(_plyr[3]+45-yoffset)<<3,_plyr[2]>>4
+  local ca,sa,cx,cy,cz=_cam.u,_cam.v,(_plyr[1]>>4)+xoffset,(-_cam.m[4]-yoffset)<<3,_plyr[2]>>4
 
   local v0,spans,pal0=v[#v],{}
   local x0,w0=v0.x,v0.w
@@ -490,16 +476,17 @@ end
 -- t: impact depth (to fix velocity)
 -- ti: impact on velocity vector
 function intersect_sub_sector(segs,p,d,tmin,tmax,radius,res,skipthings)
-  local _tmax,px,pz,dx,dz,othersector=tmax,p[1],p[2],d[1],d[2]
+  local intersectid,_tmax,px,pz,dx,dz,othersector=_intersectid,tmax,p[1],p[2],d[1],d[2]
 
   if not skipthings then
     -- hitting things?
     local things_hits={t=-32000}
     for _,thing in pairs(_things) do
       local actor=thing.actor
+      -- not already "hit"
       -- not a missile
       -- not dead
-      if actor.flags&0x4==0 and not thing.dead and thing.subs[segs] then
+      if thing.intersectid!=intersectid and actor.flags&0x4==0 and not thing.dead and thing.subs[segs] then
         -- overflow 'safe' coordinates
         local m,r={(px-thing[1])>>8,(pz-thing[2])>>8},(actor.radius+radius)>>8
         local b,c=v2_dot(m,d),v2_dot(m,m)-r*r
@@ -511,7 +498,7 @@ function intersect_sub_sector(segs,p,d,tmin,tmax,radius,res,skipthings)
             -- convert back to world units
             local t=(-b-sqrt(discr))<<8
             -- if t is negative, ray started inside sphere so clamp t to zero 
-            -- if(t<tmin) t=tmin
+            if(t<tmin) t=tmin
             -- record hit
             if t>=tmin and t<tmax then
               -- empty list case
@@ -525,6 +512,8 @@ function intersect_sub_sector(segs,p,d,tmin,tmax,radius,res,skipthings)
             end
           end
         end
+        -- avoid duplicate hits
+        thing.intersectid=intersectid
       end
     end
     -- add sorted things intersections
@@ -584,6 +573,7 @@ function line_of_sight(thing,otherthing,maxdist)
   if d<maxdist then
     -- line of sight?
     local h,hits,blocking=thing[3]+24,{}
+    _intersectid+=1
     intersect_sub_sector(thing.ssector,thing,n,0,d,0,hits,true)
     for _,hit in pairs(hits) do
       if intersect_line(hit.seg,h,0,0,true) then
@@ -692,10 +682,11 @@ function with_physic(thing)
       local move_dir,move_len,hits=v2_normal(velocity)
       
       -- cancel small moves
-      if move_len>1/32 then
+      if move_len>1/16 then
         local h,stair_h=self[3],is_missile and 0 or 24
         hits={}
         -- check intersection with actor radius
+        _intersectid+=1
         intersect_sub_sector(ss,self,move_dir,0,move_len,radius,hits)    
         -- fix position
         for _,hit in ipairs(hits) do
@@ -709,13 +700,13 @@ function with_physic(thing)
               ldef.trigger(self)
             end
           elseif otherthing!=self then
-            if is_player and otherthing and otherthing.pickup then
+            if is_player and otherthing.pickup then
               -- avoid reentrancy
               otherthing.pickup=nil
               -- jump to pickup state
               otherthing:jump_to(10)
               otherthing.actor.pickup(otherthing,self)
-            else
+            elseif self.owner!=otherthing then -- avoid projectile intersect with owner
               fix_move=intersect_thing(otherthing,h,radius) and hit
             end
           end
@@ -765,17 +756,17 @@ function with_physic(thing)
       -- triggers?
       -- check triggers/bumps/...
       if is_player then
-        if not hits then
+        --if not hits then
           hits={}
           intersect_sub_sector(ss,self,{cos(self.angle),-sin(self.angle)},0,radius+24,0,hits,true)    
-        end
+        --end
         for _,hit in ipairs(hits) do
           if hit.seg then
             local ldef=hit.seg.line
             -- buttons
             if ldef.trigger and ldef.flags&0x8>0 then
               -- use special?
-              if btn(🅾️) then
+              if btnp(🅾️) then
                 ldef.trigger()
               else
                 _msg="press 🅾️ to activate"
@@ -877,18 +868,7 @@ function attach_plyr(thing,actor,skill)
       wp_switching=nil
     end)
   end
-  local function try_switch(inc)
-    local i=wp_slot+inc
-    while not wp[i] do
-      i+=inc
-      -- wrap
-      if(i>10) i=1
-      if(i<1) i=10
-      -- no weapon to switch to
-      if(i==wp_slot) return
-    end
-    wp_switch(i)
-  end
+
 
   return setmetatable({
     update=function(self,...)
@@ -899,28 +879,39 @@ function attach_plyr(thing,actor,skill)
       wp_y=lerp(wp_y,wp_yoffset,0.3)
 
       local dx,dz=0,0
-      -- cursor: fwd+rotate
-      -- cursor+x: weapon switch+rotate
-      -- wasd: fwd+strafe
-      -- o: fire
-      if btn(🅾️) then
-        if(btn(0)) dx=1
-        if(btn(1)) dx=-1
 
-        -- todo: check weapon ready state
-        if(btn(2)) try_switch(-1)
-        if(btn(3)) try_switch(1)
+      if wp_hud then
+        wp_hud=not btn(6)
+        for i=1,4 do
+          if btnp(i-1) then
+            -- only switch if we have the weapon and it's not the current weapon
+            wp_hud,btns=(wp_slot!=i and wp[i]) and wp_switch(i) or nil,{}
+          end
+        end
       else
-        if(btn(0)) da-=1
-        if(btn(1)) da+=1
-        if(btn(2)) dz=1
-        if(btn(3)) dz=-1
+        -- cursor: fwd+rotate
+        -- cursor+x: weapon switch+rotate
+        -- wasd: fwd+strafe
+        -- o: fire
+        if btn(🅾️) then
+          if(btns[1]) dx=1
+          if(btns[2]) dx=-1
+        else
+          if(btns[1]) da-=1
+          if(btns[2]) da+=1
+        end
+        if(btns[3]) dz=1
+        if(btns[4]) dz=-1
+
+        wp_hud=btn(6)
+        poke(0x5f30,1)
+
+        -- wasd
+        if(btn(0,1)) dx=1
+        if(btn(1,1)) dx=-1
+        if(btn(2,1)) dz=1
+        if(btn(3,1)) dz=-1
       end
-      -- wasd
-      if(btn(0,1)) dx=1
-      if(btn(1,1)) dx=-1
-      if(btn(2,1)) dz=1
-      if(btn(3,1)) dz=-1
 
       self.angle-=da/256
       local ca,sa=cos(self.angle),-sin(self.angle)
@@ -978,6 +969,15 @@ function attach_plyr(thing,actor,skill)
         end
       end
 
+      -- display weapon selection hud
+      if wp_hud then
+        local uit={}
+        for i=1,#_wp_ui do
+            uit[chr((i-1)%7+97)]=_wp_ui[i]
+            if(i%7==0 and wp[uit.a])_ui_funcs[uit.b](uit.c,uit.d,uit.e,uit.f,uit.g)
+        end
+      end
+
       -- set "pain" palette (defaults to screen palette if normal)
       memcpy(0x5f10,0x4400|hit_ttl<<4,16)
     end,
@@ -987,7 +987,6 @@ function attach_plyr(thing,actor,skill)
       local hp=thing.hit(self,dmg_factor*dmg,...)
       if hp>0 then
         hit_ttl=min(ceil(hp),15)
-        _cam:shake()
       end
     end
   },{__index=thing})
@@ -1040,7 +1039,7 @@ function draw_bsp()
       local subs=node[side]
       -- potentially visible?
       local id=subs.id
-      -- use band to support gaps (nil) in pvs hash
+      -- use band to support gaps (nil) in pvs hashmap
       if band(pvs[id\32],0x0.0001<<(id&31))!=0 then
         draw_flats(v_cache,subs,sorted_things[subs])
       end
@@ -1053,6 +1052,7 @@ end
 -->8
 -- game states
 function next_state(fn,...)
+  btns,wp_hud={}
   local u,d,i=fn(...)
   -- ensure update/draw pair is consistent
   _update_state=function()
@@ -1185,7 +1185,7 @@ function play_state(skill,map_id)
   _cam=make_camera()
 
   -- start level music (if any)
-  music(_maps_music[map_id])
+  music(_maps_music[map_id],0,14)
 
   return 
     -- update
@@ -1195,7 +1195,6 @@ function play_state(skill,map_id)
       end
 
       _cam:track(_plyr,_plyr.angle,_plyr[3]+45)
-      _cam:update()
     end,
     -- draw
     function()
@@ -1225,7 +1224,6 @@ function gameover_state(pos,angle,target,h)
         angle=lerp(shortest_angle(target_angle,angle),target_angle,0.08)
       end
       _cam:track(pos,angle,pos[3]+h)
-      _cam:update()
 
       if btnp(4) or btnp(5) then
         next_state(slicefade_state,levelmenu_state)
@@ -1278,6 +1276,11 @@ function _init()
 end
 
 function _update()
+  -- get btn states and suppress pressed buttons until btnp occurs
+  for i=1,6 do
+    btns[i]=btnp(i-1) or btns[i]!=nil and btn(i-1) or nil
+  end
+
   -- any futures?
   local tmp={}
 	for k,f in pairs(_futures) do
@@ -1751,6 +1754,7 @@ function unpack_actors()
             local angle=owner.angle+(rnd(2*xspread)-xspread)/360
             -- todo: get from actor properties
             local h,hits,move_dir=owner[3]+32,{},{cos(angle),-sin(angle)}
+            _intersectid+=1
             intersect_sub_sector(owner.ssector,owner,move_dir,owner.actor.radius/2,1024,0,hits)    
             for _,hit in ipairs(hits) do
               local otherthing,fix_move=hit.thing
@@ -1791,9 +1795,9 @@ function unpack_actors()
         return function(owner)
           -- find 'real' owner
           owner=owner.owner or owner
+          -- fire at 1/2 edge of owner radius (ensure collision when close to walls)
           local angle,speed,radius=owner.angle,projectile.speed,owner.actor.radius/2
           local ca,sa=cos(angle),-sin(angle)
-          -- fire at edge of owner radius
           local thing=with_physic(make_thing(projectile,owner[1]+radius*ca,owner[2]+radius*sa,0,angle))
           thing.owner=owner
           -- todo: get height from properties
@@ -1806,7 +1810,7 @@ function unpack_actors()
       -- A_WeaponReady
       function()
         return function(weapon)
-          if btn(❎) then
+          if not wp_hud and btn(❎) then
             local inventory=weapon.owner.inventory
             local newqty=inventory[item.ammotype]-item.ammouse
             if newqty>=0 then

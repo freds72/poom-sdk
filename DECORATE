@@ -62,6 +62,8 @@ actor ArmorBonus : Armor 2015
 actor RedCard:Key 13
 {
  SlotNumber 1
+ HUDColor 12
+ Icon 17
  States
  {
   Spawn:
@@ -73,9 +75,11 @@ actor RedCard:Key 13
 actor BlueCard:Key 5
 {
  SlotNumber 2
+ HUDColor 1
+ Icon 17
  States
  {
-  Spawn:
+  Spawn:	
    RKEY A -1
    Stop
  }
@@ -84,6 +88,8 @@ actor BlueCard:Key 5
 actor YellowCard:Key 6
 {
  SlotNumber 3
+ HUDColor 15
+ Icon 17
  States
  {
   Spawn:
@@ -397,8 +403,9 @@ actor ChainGun : Weapon 2002
 
 actor PoomGuy: Player 1
 {
-	Radius 32
+	Radius 16
 	Health 100
+	Height 52
 	Armor 50
 	Speed 3
 	StartItem "ShotGun"
