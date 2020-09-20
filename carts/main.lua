@@ -14,11 +14,11 @@ local _ui_funcs,_wp_ui={circfill,rectfill,print},split"1,1,63,90,12,2,0,1,2,19,8
 -- copy color gradients (16*16 colors x 2) to memory
 memcpy(0x4300,0x1000,512)
 
--- single-linked list keyed on "w"
+-- single-linked list keyed on first element
 local depth_cls={
   __index=function(t,k)
     -- head of stack
-    local head={w=0}
+    local head={0}
     t[k]=head
     return head
   end
@@ -300,12 +300,6 @@ function draw_walls(segs,v_cache,light)
       -- span rasterization
       -- pick correct texture "major"
       local dx,u0=x1-x0,v0[seg[7]]*w0
-      local cx0,dy,du,dw=x0\1+1,(y1-y0)/dx,(v1[seg[7]]*w1-u0)/dx,(w1-w0)/dx
-      local sx=cx0-x0      
-      if(x0<0) y0-=x0*dy u0-=x0*du w0-=x0*dw cx0=0 sx=0
-      y0+=sx*dy
-      u0+=sx*du
-      w0+=sx*dw
 
       -- dual?
       local facingside,otherside,otop,obottom=ldef[seg.side],ldef[not seg.side]
@@ -315,6 +309,10 @@ function draw_walls(segs,v_cache,light)
       if ldef.flags&0x4!=0 then
         yoffset=0
       end
+
+      local yt0,yb0,yot0,yob0=y0-top*w0,y0-bottom*w0,0,0
+      local cx0,dyt,dyb,du,dw,dyot,dyob=x0\1+1,(y1-top*w1-yt0)/dx,(y1-bottom*w1-yb0)/dx,(v1[seg[7]]*w1-u0)/dx,16*(w1-w0)/dx,0,0
+
       if otherside then
         -- visible other side walls?
         otop=otherside.sector.ceil
@@ -324,48 +322,70 @@ function draw_walls(segs,v_cache,light)
           yoffset=(otop-top)>>4
         end
         -- make sure bottom is not crossing this side top
-        obottom=min(top,obottom)
         otop=max(bottom,otop)
-        if(top<=otop) otop=nil
-        if(bottom>=obottom) obottom=nil
+        if top<=otop then
+          otop=nil
+        else
+          yot0=y0-otop*w0
+          dyot=(y1-otop*w1-yot0)/dx
+        end
+        obottom=min(top,obottom)
+        if bottom>=obottom then 
+          obottom=nil
+        else
+          yob0=y0-obottom*w0
+          dyob=(y1-obottom*w1-yob0)/dx
+        end
+        otop=toptex and otop
+        obottom=bottomtex and obottom
       end
 
+      w0*=16
+      local sx=cx0-x0    
+      if(x0<0) yt0-=x0*dyt yb0-=x0*dyb u0-=x0*du w0-=x0*dw yot0-=x0*dyot yob0-=x0*dyob cx0=0 sx=0
+      yt0+=sx*dyt
+      yb0+=sx*dyb
+      yot0+=sx*dyot
+      yob0+=sx*dyob
+      u0+=sx*du
+      w0+=sx*dw
+      
       if(x1>127) x1=127
       for x=cx0,x1\1 do
         if w0>0.15 then
-          -- color shifing
-          local pal1=(light*min(15,w0<<5))\1
+          -- backup top/bottom + color shifing
+          local t,ct,b,pal1=yt0,yt0\1+1,yb0,(light*min(15,w0<<1))\1
           if(pal0!=pal1) memcpy(0x5f00,0x4300|pal1<<4,16) pal0=pal1
-          local t,b,w=y0-top*w0,y0-bottom*w0,w0<<4
+
           -- wall
           -- top wall side between current sector and back sector
-          local ct=t\1+1
-          if otop and toptex then
+          if otop then
             poke4(0x5f38,toptex)             
-            local ot=y0-otop*w0
-            tline(x,ct,x,ot,u0/w,(ct-t)/w+yoffset,0,1/w)
+            tline(x,ct,x,yot0,u0/w0,(ct-t)/w0+yoffset,0,1/w0)
             -- new window top
-            t=ot
-            ct=ot\1+1
+            t=yot0
+            ct=yot0\1+1
           end
           -- bottom wall side between current sector and back sector     
-          if obottom and bottomtex then
+          if obottom then
             poke4(0x5f38,bottomtex)             
-            local ob=y0-obottom*w0
-            local cob=ob\1+1
-            tline(x,cob,x,b,u0/w,(cob-ob)/w,0,1/w)
+            local cob=yob0\1+1
+            tline(x,cob,x,b,u0/w0,(cob-yob0)/w0,0,1/w0)
             -- new window bottom
-            b=ob\1
+            b=yob0
           end
           -- middle wall?
           if not otherside and midtex then
             -- texture selection
             poke4(0x5f38,midtex)
 
-            tline(x,ct,x,b,u0/w,(ct-t)/w+yoffset,0,1/w)
+            tline(x,ct,x,b,u0/w0,(ct-t)/w0+yoffset,0,1/w0)
           end
         end
-        y0+=dy
+        yt0+=dyt
+        yb0+=dyb
+        yot0+=dyot
+        yob0+=dyob
         u0+=du
         w0+=dw
       end
@@ -424,6 +444,40 @@ function draw_flats(v_cache,segs,things)
       local things=setmetatable({},depth_cls)
       for thing,_ in pairs(segs.things) do
         -- todo: cache thing projection
+        -- done: not sure if faster (90% of things are single sub-sector...)
+        --[[        
+        local v=v_cache[thing]
+        if not v then
+          local x,y=thing[1],thing[2]
+          local ax,az=m1*x+m3*y+m4,m9*x+m11*y+m12
+          -- todo: take radius into account 
+          if az>_znear and az<_zfar and ax<az and -ax<az then
+            -- h: thing offset+cam offset
+            local w,h=128/az,thing[3]+m8
+            local x,y=63.5+ax*w,63.5-h*w
+            -- visible
+            v={x=x,y=y,w=w}
+          else
+            v={}
+          end
+          v_cache[thing]=v
+        end
+        -- visible?
+        local w=v.w
+        if w then
+          -- get start of linked list
+          local head=things[1]
+          -- empty list case
+          local prev=head
+          while head and head.w<w do
+            -- swap/advance
+            prev,head=head,head.next
+          end
+          -- insert new thing
+          prev.next={thing=thing,x=v.x,y=v.y,w=w,next=prev.next}
+        end
+      end          
+      ]]
         local x,y=thing[1],thing[2]
         local ax,az=m1*x+m3*y+m4,m9*x+m11*y+m12
         -- todo: take radius into account 
@@ -435,18 +489,18 @@ function draw_flats(v_cache,segs,things)
           local head=things[1]
           -- empty list case
           local prev=head
-          while head and head.w<w do
+          while head and head[1]<w do
             -- swap/advance
             prev,head=head,head.next
           end
           -- insert new thing
-          prev.next={thing=thing,x=x,y=y,w=w,next=prev.next}
+          prev.next={w,thing,x,y,next=prev.next}
         end
       end
       -- things are sorted, draw them
       local head,pal0=things[1].next
       while head do
-        local thing,x0,y0,w0=head.thing,head.x,head.y,head.w
+        local w0,thing,x0,y0=unpack(head)
         -- get image from current state
         local frame=thing.state
         local side,_,flipx,bright,sides=0,unpack(frame)
