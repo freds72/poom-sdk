@@ -5,7 +5,7 @@ __lua__
 -- globals
 local _bsp,_cam,_plyr,_things,_sprite_cache,_actors
 local _onoff_textures={}
-local _ambientlight,_znear,_ammo_factor,_intersectid,_msg=0,8,1,0
+local _ambientlight,_znear,_zfar,_ammo_factor,_intersectid,_msg=0,8,854,1,0
 local _ui_funcs,_wp_ui={circfill,rectfill,print},split"1,1,63,90,12,2,0,1,2,19,86,49,94,0,1,3,⬅️,52,88,5,0,1,3,shotgun,21,88,11,0,2,2,77,86,111,94,0,2,3,➡️,68,88,5,0,2,3,chaingun,79,88,11,0,3,2,50,68,76,76,0,3,3,⬆️,60,80,5,0,3,3,rocket,52,70,11,0,4,2,50,104,76,112,0,4,3,⬇️,60,96,5,0,4,3,plasma,52,106,11,0"
 
 --local k_far,k_near=0,2
@@ -13,6 +13,16 @@ local _ui_funcs,_wp_ui={circfill,rectfill,print},split"1,1,63,90,12,2,0,1,2,19,8
 
 -- copy color gradients (16*16 colors x 2) to memory
 memcpy(0x4300,0x1000,512)
+
+-- single-linked list keyed on "w"
+local depth_cls={
+  __index=function(t,k)
+    -- head of stack
+    local head={w=0}
+    t[k]=head
+    return head
+  end
+}
 
 function make_camera()
   return {
@@ -38,7 +48,7 @@ function make_camera()
         local ax,az=(m1*x+m3*z+m4)<<1,m9*x+m11*z+m12
         -- todo: optimize?
         if(az>_znear) code=0
-        if(az>854) code|=1
+        if(az>_zfar) code|=1
         if(ax>az) code|=4
         if(-ax>az) code|=8
         outcode&=code
@@ -123,6 +133,8 @@ function vspr(frame,sx,sy,scale,flipx)
   palt(tc,true)
   local sw,xscale=xoffset*scale,flipx and -scale or scale
   sx-=sw
+  -- todo: bug?
+  if(flipx) sx+=sw  
 	sy-=yoffset*scale
 	for i,tile in pairs(tiles) do
     local dx,dy,ssx,ssy=sx+(i%w)*xscale,sy+(i\w)*scale,_sprite_cache:use(tile)
@@ -380,7 +392,7 @@ function draw_flats(v_cache,segs,things)
         m1*x+m3*z+m4,
         m9*x+m11*z+m12
       if(az>_znear) code=0
-      if(az>854) code|=1
+      if(az>_zfar) code|=1
       -- fov adjustment
       if(-2*ax>az) code|=4
       if(2*ax>az) code|=8
@@ -409,6 +421,29 @@ function draw_flats(v_cache,segs,things)
       draw_walls(segs,verts,light)
 
       -- draw things (if any) in this convex space
+      local things=setmetatable({},depth_cls)
+      for thing,_ in pairs(segs.things) do
+        -- todo: cache thing projection
+        local x,y=thing[1],thing[2]
+        local ax,az=m1*x+m3*y+m4,m9*x+m11*y+m12
+        -- todo: take radius into account 
+        if az>_znear and az<_zfar and ax<az and -ax<az then
+          -- h: thing offset+cam offset
+          local w,h=128/az,thing[3]+m8
+          local x,y=63.5+ax*w,63.5-h*w
+          -- get start of linked list
+          local head=things[1]
+          -- empty list case
+          local prev=head
+          while head and head.w<w do
+            -- swap/advance
+            prev,head=head,head.next
+          end
+          -- insert new thing
+          prev.next={thing=thing,x=x,y=y,w=w,next=prev.next}
+        end
+      end
+      -- things are sorted, draw them
       local head,pal0=things[1].next
       while head do
         local thing,x0,y0,w0=head.thing,head.x,head.y,head.w
@@ -452,22 +487,43 @@ function find_sub_sector(node,pos)
   end
 end
 
-function find_ssector_thick(node,pos,radius,res)
-  local dist,d=v2_dot(node,pos),node[3]
-  local side,otherside=dist<=d-radius,dist<=d+radius
-  -- leaf?
-  if node.leaf[side] then
-    res[node[side]]=true
-  else
-    find_ssector_thick(node[side],pos,radius,res)
+function add_thing(thing)
+  register_thing_subs(_bsp,thing,thing.actor.radius/2)
+  add(_things,thing)
+end
+
+function del_thing(thing)
+  do_async(function()
+    unregister_thing_subs(thing)
+    del(_things,thing) 
+  end)
+end
+
+function unregister_thing_subs(thing)
+  -- remove self from sectors
+  for ss,_ in pairs(thing.subs) do
+    ss.things[thing]=nil
   end
+end
+
+function register_thing_subs(node,thing,radius)
+  -- leaf?
+  if node.pvs then
+    -- thing -> sector
+    thing.subs[node]=true
+    -- reverse
+    node.things[thing]=true
+    return
+  end
+
+  local dist,d=v2_dot(node,thing),node[3]
+  local side,otherside=dist<=d-radius,dist<=d+radius
+  
+  register_thing_subs(node[side],thing,radius)
+  
   -- straddling?
   if side!=otherside then
-    if node.leaf[otherside] then
-      res[node[otherside]]=true
-    else
-      find_ssector_thick(node[otherside],pos,radius,res)
-    end
+    register_thing_subs(node[otherside],thing,radius)
   end
 end
 
@@ -481,12 +537,12 @@ function intersect_sub_sector(segs,p,d,tmin,tmax,radius,res,skipthings)
   if not skipthings then
     -- hitting things?
     local things_hits={t=-32000}
-    for _,thing in pairs(_things) do
+    for thing,_ in pairs(segs.things) do
       local actor=thing.actor
       -- not already "hit"
       -- not a missile
       -- not dead
-      if thing.intersectid!=intersectid and actor.flags&0x4==0 and not thing.dead and thing.subs[segs] then
+      if thing.intersectid!=intersectid and actor.flags&0x4==0 and not thing.dead then
         -- overflow 'safe' coordinates
         local m,r={(px-thing[1])>>8,(pz-thing[2])>>8},(actor.radius+radius)>>8
         local b,c=v2_dot(m,d),v2_dot(m,m)-r*r
@@ -586,27 +642,10 @@ function line_of_sight(thing,otherthing,maxdist)
   return n
 end
 
-local depth_cls={
-  __index=function(t,k)
-    -- head of stack
-    local head={w=0}
-    t[k]=head
-    return head
-  end
-}
-local depthsorted_cls={
-  __index=function(t,k)
-    local s=setmetatable({},depth_cls)
-    t[k]=s
-    return s
-  end
-}
-
 function make_thing(actor,x,y,z,angle)
    -- all sub-sectors that thing touches
   -- used for rendering and collision detection
-  local subs,pos={},{x,y}
-  find_ssector_thick(_bsp,pos,actor.radius/2,subs)
+  local pos={x,y}
   -- default height & sector specs
   local ss=find_sub_sector(_bsp,pos)
   -- attach instance properties to new thing
@@ -614,10 +653,11 @@ function make_thing(actor,x,y,z,angle)
     -- z: altitude
     x,y,ss.sector.floor,
     angle=angle,
-    subs=subs,
     sector=ss.sector,
-    ssector=ss
+    ssector=ss,
+    subs={}
   })
+  
   if actor.flags&0x2>0 then
     -- shootable
     thing=with_physic(with_health(thing))
@@ -685,6 +725,9 @@ function with_physic(thing)
       if move_len>1/16 then
         local h,stair_h=self[3],is_missile and 0 or 24
         hits={}
+
+        unregister_thing_subs(self)
+        
         -- check intersection with actor radius
         _intersectid+=1
         intersect_sub_sector(ss,self,move_dir,0,move_len,radius,hits)    
@@ -699,7 +742,7 @@ function with_physic(thing)
             if is_player and ldef.trigger and ldef.flags&0x10>0 then
               ldef.trigger(self)
             end
-          elseif otherthing!=self then
+          else
             if is_player and otherthing.pickup then
               -- avoid reentrancy
               otherthing.pickup=nil
@@ -745,9 +788,8 @@ function with_physic(thing)
         self.ssector=ss
 
         -- refresh overlapping sectors
-        local subs={}
-        find_ssector_thick(_bsp,self,radius/2,subs)
-        self.subs=subs
+        self.subs={}
+        register_thing_subs(_bsp,self,radius/2)
       else
         velocity[1]=0
         velocity[2]=0
@@ -999,39 +1041,6 @@ function draw_bsp()
   -- 
   local pvs,v_cache=_plyr.ssector.pvs,{}
 
-  local sorted_things=setmetatable({},depthsorted_cls)
-  local m1,m2,m3,m4,m5,m6,m7=unpack(_cam.m)
-  for _,thing in pairs(_things) do
-    -- visible?
-    local viz
-    for sub,_ in pairs(thing.subs) do
-      local id=sub.id
-      if(band(pvs[id\32],0x0.0001<<(id&31))!=0) viz=true break
-    end
-    if viz then
-      local x,y=thing[1],thing[2]
-      local ax,az=m1*x+m2*y+m3,m5*x+m6*y+m7
-      if az>_znear and 2*ax<az and -2*ax<az then
-        -- h: thing offset+cam offset
-        local w,h=128/az,thing[3]+m4
-        local x,y=63.5+ax*w,63.5-h*w
-        -- insertion sort into each sub
-        for sub,_ in pairs(thing.subs) do
-          -- get start of linked list
-          local head=sorted_things[sub][1]
-          -- empty list case
-          local prev=head
-          while head and head.w<w do
-            -- swap/advance
-            prev,head=head,head.next
-          end
-          -- insert new thing
-          prev.next={thing=thing,x=x,y=y,w=w,next=prev.next}
-        end
-      end
-    end
-  end
-
   -- visit bsp
   visit_bsp(_bsp,_plyr,function(node,side,pos,visitor)
     side=not side
@@ -1041,7 +1050,7 @@ function draw_bsp()
       local id=subs.id
       -- use band to support gaps (nil) in pvs hashmap
       if band(pvs[id\32],0x0.0001<<(id&31))!=0 then
-        draw_flats(v_cache,subs,sorted_things[subs])
+        draw_flats(v_cache,subs)
       end
     elseif _cam:is_visible(node.bbox[side]) then
       visit_bsp(node[side],pos,visitor)
@@ -1164,11 +1173,12 @@ function play_state(skill,map_id)
   -- fix garbage sprites when loading 2nd map
   _sprite_cache:clear()
 
+  -- reset misc things
+  _ambientlight,_things,_plyr,_bsp=0,{}
+
   -- ammo scaling factor
   _ammo_factor=split"2,1,1,1"[skill]
   _bsp,thingdefs=unpack_map(skill,_actors,_maps_cart[map_id],_maps_offset[map_id])
-  -- reset misc things
-  _ambientlight,_things,_plyr=0,{}
 
   -- attach behaviors to things
   for _,thingdef in pairs(thingdefs) do 
@@ -1178,7 +1188,8 @@ function play_state(skill,map_id)
       _plyr=attach_plyr(thing,actor,skill)
       thing=_plyr
     end
-    add(_things,thing)
+    -- 
+    add_thing(thing)
   end
   assert(_plyr,"missing player in level")
 
@@ -1617,7 +1628,7 @@ function unpack_actors()
 ::loop::
               local state=states[i]
               -- stop (or end of vm instructions)
-              if(not state or state.jmp==-1) do_async(function() del(_things,self) end) return
+              if(not state or state.jmp==-1) del_thing(self) return
               -- loop or goto
               if(state.jmp) self:jump_to(state.jmp) goto loop
 
@@ -1722,7 +1733,7 @@ function unpack_actors()
 
         target:attach_weapon(thing)
         -- remove from things
-        do_async(function() del(_things,thing) end)
+        del_thing(thing)
       end
     elseif kind==3 then
       -- health pickup
@@ -1772,7 +1783,7 @@ function unpack_actors()
                 -- todo: get height from properties
                 -- todo: improve z setting
                 puffthing[3]=h
-                add(_things,puffthing)
+                add_thing(puffthing)
       
                 -- hit thing
                 if(otherthing and otherthing.hit) otherthing:hit(dmg,move_dir,owner)
@@ -1804,7 +1815,7 @@ function unpack_actors()
           -- todo: improve z setting
           thing[3]=owner[3]+32
           thing:apply_forces(speed*ca,speed*sa)         
-          add(_things,thing)
+          add_thing(thing)
         end
       end,
       -- A_WeaponReady
@@ -2013,7 +2024,7 @@ function unpack_map(skill,actors,map_cart_id,map_cart_offset)
   -- convex sub-sectors
   unpack_array(function(i)
     -- register current sub-sector in pvs
-    local segs={id=i,pvs={}}
+    local segs={id=i,pvs={},things={}}
     unpack_array(function()
       local s=add(segs,{
         -- 1: vertex
@@ -2064,6 +2075,7 @@ function unpack_map(skill,actors,map_cart_id,map_cart_offset)
     end
     add(sub_sectors,segs)
   end)
+
   -- fix seg -> sub-sector link (e.g. portals)
   for _,seg in pairs(all_segs) do
     seg.partner=sub_sectors[seg.partner]
