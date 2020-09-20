@@ -287,7 +287,7 @@ end
 function draw_walls(segs,v_cache,light)
   -- get heights
   local sector=segs.sector
-  local v0,top,bottom,pal0=v_cache[#v_cache],sector.ceil,sector.floor
+  local v0,top,bottom,pal0=v_cache[#v_cache],sector.ceil>>4,sector.floor>>4
   local x0,y0,w0=v0.x,v0.y,v0.w
 
   -- todo: test ipairs
@@ -304,96 +304,83 @@ function draw_walls(segs,v_cache,light)
       -- dual?
       local facingside,otherside,otop,obottom=ldef[seg.side],ldef[not seg.side]
       -- peg bottom?
-      local yoffset,toptex,midtex,bottomtex=(bottom-top)>>4,facingside.toptex,facingside.midtex,facingside.bottomtex
+      local yoffset,toptex,midtex,bottomtex=bottom-top,facingside.toptex,facingside.midtex,facingside.bottomtex
       -- fix animated side walls (elevators)
       if ldef.flags&0x4!=0 then
         yoffset=0
       end
-
-      local yt0,yb0,yot0,yob0=y0-top*w0,y0-bottom*w0,0,0
-      local cx0,dyt,dyb,du,dw,dyot,dyob=x0\1+1,(y1-top*w1-yt0)/dx,(y1-bottom*w1-yb0)/dx,(v1[seg[7]]*w1-u0)/dx,16*(w1-w0)/dx,0,0
-
       if otherside then
         -- visible other side walls?
-        otop=otherside.sector.ceil
-        obottom=otherside.sector.floor
+        otop=otherside.sector.ceil>>4
+        obottom=otherside.sector.floor>>4
         -- offset animated walls (doors)
         if ldef.flags&0x4!=0 then
-          yoffset=(otop-top)>>4
+          yoffset=otop-top
         end
         -- make sure bottom is not crossing this side top
-        otop=max(bottom,otop)
-        if top<=otop then
-          otop=nil
-        else
-          yot0=y0-otop*w0
-          dyot=(y1-otop*w1-yot0)/dx
-        end
         obottom=min(top,obottom)
-        if bottom>=obottom then 
-          obottom=nil
-        else
-          yob0=y0-obottom*w0
-          dyob=(y1-obottom*w1-yob0)/dx
-        end
+        otop=max(bottom,otop)
+        if(top<=otop) otop=nil
+        if(bottom>=obottom) obottom=nil
+        -- kill top/bottom if no textures
         otop=toptex and otop
         obottom=bottomtex and obottom
       end
 
-      w0*=16
+      local cx0,dy,du,dw=x0\1+1,(y1-y0)/dx,(v1[seg[7]]*w1-u0)/dx,((w1-w0)<<4)/dx
+      w0<<=4
       local sx=cx0-x0    
-      if(x0<0) yt0-=x0*dyt yb0-=x0*dyb u0-=x0*du w0-=x0*dw yot0-=x0*dyot yob0-=x0*dyob cx0=0 sx=0
-      yt0+=sx*dyt
-      yb0+=sx*dyb
-      yot0+=sx*dyot
-      yob0+=sx*dyob
+      if(x0<0) y0-=x0*dy u0-=x0*du w0-=x0*dw cx0=0 sx=0
+      y0+=sx*dy
       u0+=sx*du
       w0+=sx*dw
       
       if(x1>127) x1=127
       for x=cx0,x1\1 do
         if w0>0.15 then
-          -- backup top/bottom + color shifing
-          local t,ct,b,pal1=yt0,yt0\1+1,yb0,(light*min(15,w0<<1))\1
+          -- top/bottom+color shifing
+          local t,b,pal1=y0-top*w0,y0-bottom*w0,(light*min(15,w0<<1))\1
           if(pal0!=pal1) memcpy(0x5f00,0x4300|pal1<<4,16) pal0=pal1
 
-          -- wall
           -- top wall side between current sector and back sector
+          local ct=t\1+1
+
           if otop then
             poke4(0x5f38,toptex)             
-            tline(x,ct,x,yot0,u0/w0,(ct-t)/w0+yoffset,0,1/w0)
+            local ot=y0-otop*w0
+            tline(x,ct,x,ot,u0/w0,(ct-t)/w0+yoffset,0,1/w0)
             -- new window top
-            t=yot0
-            ct=yot0\1+1
+            t=ot+0
+            ct=ot\1+1
           end
           -- bottom wall side between current sector and back sector     
           if obottom then
             poke4(0x5f38,bottomtex)             
-            local cob=yob0\1+1
-            tline(x,cob,x,b,u0/w0,(cob-yob0)/w0,0,1/w0)
+            local ob=y0-obottom*w0
+            local cob=ob\1+1
+            tline(x,cob,x,b,u0/w0,(cob-ob)/w0,0,1/w0)
             -- new window bottom
-            b=yob0
+            b=ob+0
           end
+  
           -- middle wall?
-          if not otherside and midtex then
+          if midtex then
             -- texture selection
             poke4(0x5f38,midtex)
-
             tline(x,ct,x,b,u0/w0,(ct-t)/w0+yoffset,0,1/w0)
           end
         end
-        yt0+=dyt
-        yb0+=dyb
-        yot0+=dyot
-        yob0+=dyob
+        y0+=dy
         u0+=du
         w0+=dw
       end
     end
     v0=v1
-    x0=_x1
-    y0=y1
-    w0=w1
+    -- "exploit" known bug: local decl is faster than assigns unless a sum(!!)
+    -- to be removed when: https://www.lexaloffle.com/bbs/?tid=39090 is fixed
+    x0=_x1+0
+    y0=y1+0
+    w0=w1+0
   end
 end
 
