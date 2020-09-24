@@ -58,7 +58,8 @@ ZDoom Wiki (outstanding content folks!)
       --carts-path CARTS_PATH
                             path to carts folder where game is exported
       --mod-name MOD_NAME   game cart name (ex: poom)
-      --map MAP             map name to compile (ex: E1M1)    
+      --map MAP             map name to compile (ex: E1M1)
+      --compress            Enable compression (default: false)  
     ```
 
 ## Compile & Run Poom

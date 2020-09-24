@@ -175,7 +175,7 @@ function make_sprite_cache(tiles,maxlen)
 	
 	return {
     clear=function()  len,index,first,last=0,{} end,
-		use=function(self,id)
+    use=function(self,id)
 			local entry=index[id]
 			if entry then
 				-- existing item?
@@ -337,7 +337,7 @@ function draw_walls(segs,v_cache,light)
       
       if(x1>127) x1=127
       for x=cx0,x1\1 do
-        if w0>0.15 then
+        if w0>2.4 then
           -- top/bottom+color shifing
           local t,b,pal1=y0-top*w0,y0-bottom*w0,(light*min(15,w0<<1))\1
           if(pal0!=pal1) memcpy(0x5f00,0x4300|pal1<<4,16) pal0=pal1
@@ -1028,7 +1028,6 @@ function attach_plyr(thing,actor,skill)
       wp_switch(slot)
     end,
     hud=function(self)
-      
       local active_wp=wp[wp_slot]
       local frame,light=active_wp.state,self.sector.lightlevel
       
@@ -1115,113 +1114,32 @@ function next_state(fn,...)
   end
 end
 
--- level selection
-function levelmenu_state()
-  return make_menu(
-    "wHICH ePISODE?:",
-    _maps_label,
-    function(map_id)
-      next_state(skillmenu_state,map_id)
-    end)
-end
-
--- skill selection
-function skillmenu_state(map_id)
-  return make_menu(
-  "sELECT sKILL lEVEL:",
-  {
-    "i AM TOO YOUNG TO DIE",
-    "hEY, NOT TOO ROUGH",
-    "hURT ME PLENTY",
-    "uLTRA-vIOLENCE"
-  },function(skill)
-    do_async(function()
-      -- clear seed
-      memset(0x7fc0,0,64)
-      wait_async(20)
-      next_state(play_state,skill,map_id)
-    end)
-  end)
-end
-
-function make_menu(title,options,fn)
-  local colors,sel,loading={
-    [7]=10,
-    [10]=9,
-    [9]=8,
-    [8]=2,
-    [2]=1,
-    [1]=0},1
-  
-  -- stop music (if any)
-  music(-1,250)
-  
-  return 
-    -- update
-    function()
-      if(btnp(2)) sel-=1
-      if(btnp(3)) sel+=1
-      if not loading and (btnp(5) or btnp(4)) then
-        -- avoid reentrancy
-        loading=true
-        -- callback
-        fn(sel)
-      end
-      sel=mid(sel,1,#options)
-    end,
-    -- draw
-    function()
-      rectfill(0,0,127,99,0)
-      spr(160,0,14,16,4)
-      
-      printb(title,30,50,4,2)
-
-      for i,txt in pairs(options) do 
-        local y=50+i*10
-        printb(txt,30,y,9,4)
-        if(sel==i) sspr(flr(time()%2)*10,112,10,10,18,y-1,10,10)
-      end
-
-      -- doom fire!
-      -- credits: https://fabiensanglard.net/doom_fire_psx/index.html
-      for x=0,127 do
-        for y=127,100,-1 do
-          local c=pget(x,y)
-          -- decay
-          pset((x+rnd(2)-1)&127,y-1,rnd()>0.5 and colors[c] or c)
-        end
-      end
-    end,
-    -- init
-    function()
-      cls()
-      pal()
-      reload()
-      -- seed line
-      memset(0x7fc0,0x77,64)
-    end
-end
-
-function play_state(skill,map_id)
+function play_state()
   cls()  
   printb("loading...",44,120,6,5)
   flip()
 
+  -- todo: get from stat/title menu
+  skill=1 
+  map_id=1
+
+  -- actor sprites
   -- not already loaded?
   if not _actors then
-    _actors,_sprite_cache=unpack_actors()
+    _actors,_sprite_cache=decompress(mod_name,0,0,unpack_actors)
   end
   -- fix garbage sprites when loading 2nd map
-  _sprite_cache:clear()
-
-  -- reset misc things
-  _ambientlight,_things,_plyr,_bsp=0,{}
+  _sprite_cache:clear()  
 
   -- ammo scaling factor
   _ammo_factor=split"2,1,1,1"[skill]
-  _bsp,thingdefs=unpack_map(skill,_actors,_maps_cart[map_id],_maps_offset[map_id])
+  _bsp,thingdefs=decompress(mod_name.."_"..mod_map,_maps_cart[map_id],_maps_offset[map_id],unpack_map,skill,_actors)
+
+  -- restore main data cart
+  reload()
 
   -- attach behaviors to things
+  _things={}
   for _,thingdef in pairs(thingdefs) do 
     local thing,actor=make_thing(unpack(thingdef))
     -- get direct access to player
@@ -1232,6 +1150,7 @@ function play_state(skill,map_id)
     -- 
     add_thing(thing)
   end
+
   assert(_plyr,"missing player in level")
 
   _cam=make_camera()
@@ -1277,13 +1196,17 @@ function gameover_state(pos,angle,target,h)
       end
       _cam:track(pos,angle,pos[3]+h)
 
-      if btnp(4) or btnp(5) then
+      if btnp(🅾️) then
         next_state(slicefade_state,levelmenu_state)
+      elseif btnp(❎) then
+        next_state(slicefade_state,play_state)
       end
     end,
     -- draw
     function()
       draw_bsp()
+
+      if(time()%4<2) printb("you died - ❎ restart/🅾️ menu",8,120,12)
 
       -- set screen palette
       -- pal({140,1,139,3,4,132,133,7,6,134,5,8,2,9,10},1)
@@ -1324,7 +1247,7 @@ end
 -->8
 -- game loop
 function _init()
-  next_state(levelmenu_state)
+  next_state(play_state)
 end
 
 function _update()
@@ -1400,19 +1323,6 @@ function z_poly_clip(znear,v)
 end
 
 -->8
--- unpack map
-local cart_id,mem=0
-function mpeek()
-	if mem==0x4300 then
-    cart_id+=1
-		reload(0,0,0x4300,mod_name.."_"..cart_id..".p8")
-		mem=0
-	end
-	local v=@mem
-	mem+=1
-	return v
-end
-
 -- w: number of bytes (1 or 2)
 function unpack_int(w)
   w=w or 1
@@ -1596,10 +1506,6 @@ function unpack_texture()
 end
 
 function unpack_actors()
-  -- jump to data cart
-  cart_id,mem=0,0
-  reload(0,0,0x4300,mod_name.."_"..cart_id..".p8")
-  
   -- sprite index
 	local actors,frames,tiles={},{},{}
   unpack_array(function()
@@ -1620,7 +1526,7 @@ function unpack_actors()
 			add(tiles,unpack_fixed())
 		end
   end)
-  
+
   -- inventory & things
   local unpack_actor_ref=function()
     return actors[unpack_variant()]
@@ -1992,11 +1898,7 @@ function unpack_actors()
 end
 
 -- unpack level data (geometry + things)
-function unpack_map(skill,actors,map_cart_id,map_cart_offset)
-  -- jump to map cart
-  cart_id,mem=map_cart_id,map_cart_offset
-  reload(0,0,0x4300,mod_name.."_"..cart_id..".p8")
-  
+function unpack_map(skill,actors)
   -- sectors
   local sectors,sides,verts,lines,sub_sectors,all_segs,nodes={},{},{},{},{},{},{}
   unpack_array(function(i)
@@ -2144,7 +2046,7 @@ function unpack_map(skill,actors,map_cart_id,map_cart_offset)
     unpack_node(true,flags&0x1>0)
     unpack_node(false,flags&0x2>0)
   end)
-  
+
   -- texture pairs
   unpack_array(function()
     _onoff_textures[unpack_fixed()]=unpack_fixed()
@@ -2169,6 +2071,5 @@ function unpack_map(skill,actors,map_cart_id,map_cart_offset)
   end)
 
   -- restore main cart
-  reload()
   return nodes[#nodes],things
 end
