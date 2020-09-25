@@ -134,7 +134,7 @@ function vspr(frame,sx,sy,scale,flipx)
   local sw,xscale=xoffset*scale,flipx and -scale or scale
   sx-=sw
   -- todo: bug?
-  if(flipx) sx+=sw  
+  -- if(flipx) sx+=sw  
 	sy-=yoffset*scale
 	for i,tile in pairs(tiles) do
     local dx,dy,ssx,ssy=sx+(i%w)*xscale,sy+(i\w)*scale,_sprite_cache:use(tile)
@@ -277,10 +277,12 @@ function polyfill(v,xoffset,yoffset,tex,light)
 
       x0+=dx
       w0+=dw
-    end			
-    x0=_x1
-    y0=_y1
-    w0=_w1
+    end		
+    -- "exploit" known bug: local decl is faster than assigns unless a sum(!!)
+    -- to be removed when: https://www.lexaloffle.com/bbs/?tid=39090 is fixed	
+    x0=_x1+0
+    y0=_y1+0
+    w0=_w1+0
   end
 end
 
@@ -510,40 +512,26 @@ function draw_flats(v_cache,segs,things)
     end
   end
 end
--- traverse and renders bsp in back to front order
--- calls 'visit' function
-function visit_bsp(node,pos,visitor)
-  local side=node[1]*pos[1]+node[2]*pos[2]<=node[3]
-  visitor(node,side,pos,visitor)
-  visitor(node,not side,pos,visitor)
-end
-
-function find_sub_sector(node,pos)
-  local side=v2_dot(node,pos)<=node[3]
-  if node.leaf[side] then
-    -- leaf?
-    return node[side]
-  else    
-    return find_sub_sector(node[side],pos)
-  end
-end
 
 function add_thing(thing)
   register_thing_subs(_bsp,thing,thing.actor.radius/2)
-  add(_things,thing)
+  _things[#_things+1]=thing
 end
 
 function del_thing(thing)
   do_async(function()
+    -- detach thing from sub-sector
     unregister_thing_subs(thing)
     del(_things,thing) 
   end)
 end
 
 function unregister_thing_subs(thing)
-  -- remove self from sectors
+  -- remove self from sectors (multiple)
+  local not_missile=thing.actor.flags&0x4==0
   for ss,_ in pairs(thing.subs) do
     ss.things[thing]=nil
+    if(not_missile) ss.sector.things-=1
   end
 end
 
@@ -554,6 +542,8 @@ function register_thing_subs(node,thing,radius)
     thing.subs[node]=true
     -- reverse
     node.things[thing]=true
+    -- don't count missile actors
+    if(thing.actor.flags&0x4==0) node.sector.things+=1
     return
   end
 
@@ -616,7 +606,7 @@ function intersect_sub_sector(segs,p,d,tmin,tmax,radius,res,skipthings)
     -- add sorted things intersections
     local head=things_hits.next
     while head do
-      add(res,head)
+      res[#res+1]=head
       head=head.next
     end
   end
@@ -624,10 +614,7 @@ function intersect_sub_sector(segs,p,d,tmin,tmax,radius,res,skipthings)
   for _,s0 in ipairs(segs) do
     local n=s0[5]
     local denom,dist_a=v2_dot(n,d),s0[6]-v2_dot(n,p)
-    if denom==0 then
-      -- parallel and outside
-      if(dist_a<0) return
-    else
+    if denom>0 then
       local t=dist_a/denom
       -- within seg?
       local pt={
@@ -688,7 +675,7 @@ function make_thing(actor,x,y,z,angle)
   -- used for rendering and collision detection
   local pos={x,y}
   -- default height & sector specs
-  local ss=find_sub_sector(_bsp,pos)
+  local ss=_bsp:find_sub_sector(pos)
   -- attach instance properties to new thing
   local thing=actor:attach({
     -- z: altitude
@@ -824,7 +811,7 @@ function with_physic(thing)
         v2_add(self,velocity)
 
         -- refresh sector after fixed collision
-        ss=find_sub_sector(_bsp,self)
+        ss=_bsp:find_sub_sector(self)
         self.sector=ss.sector
         self.ssector=ss
 
@@ -1082,7 +1069,7 @@ function draw_bsp()
   local pvs,v_cache=_plyr.ssector.pvs,{}
 
   -- visit bsp
-  visit_bsp(_bsp,_plyr,function(node,side,pos,visitor)
+  _bsp:visit(_plyr,function(node,side,pos,visitor)
     side=not side
     if node.leaf[side] then
       local subs=node[side]
@@ -1093,7 +1080,7 @@ function draw_bsp()
         draw_flats(v_cache,subs)
       end
     elseif _cam:is_visible(node.bbox[side]) then
-      visit_bsp(node[side],pos,visitor)
+      node[side]:visit(pos,visitor)
     end
   end)
 end
@@ -1115,25 +1102,17 @@ function next_state(fn,...)
 end
 
 function play_state()
-  cls()  
-  printb("loading...",44,120,6,5)
-  flip()
-
-  -- todo: get from stat/title menu
-  skill=1 
-  map_id=1
-
   -- actor sprites
-  -- not already loaded?
   if not _actors then
+    -- not already loaded?
     _actors,_sprite_cache=decompress(mod_name,0,0,unpack_actors)
   end
   -- fix garbage sprites when loading 2nd map
   _sprite_cache:clear()  
 
   -- ammo scaling factor
-  _ammo_factor=split"2,1,1,1"[skill]
-  _bsp,thingdefs=decompress(mod_name.."_"..mod_map,_maps_cart[map_id],_maps_offset[map_id],unpack_map,skill,_actors)
+  _ammo_factor=split"2,1,1,1"[_skill]
+  _bsp,thingdefs=decompress(mod_name.."_"..mod_map,_maps_cart[_map_id],_maps_offset[_map_id],unpack_map,_skill,_actors)
 
   -- restore main data cart
   reload()
@@ -1144,7 +1123,7 @@ function play_state()
     local thing,actor=make_thing(unpack(thingdef))
     -- get direct access to player
     if actor.id==1 then
-      _plyr=attach_plyr(thing,actor,skill)
+      _plyr=attach_plyr(thing,actor,_skill)
       thing=_plyr
     end
     -- 
@@ -1197,7 +1176,8 @@ function gameover_state(pos,angle,target,h)
       _cam:track(pos,angle,pos[3]+h)
 
       if btnp(🅾️) then
-        next_state(slicefade_state,levelmenu_state)
+        -- back to title cart        
+        load(mod_name.."_0.p8")
       elseif btnp(❎) then
         next_state(slicefade_state,play_state)
       end
@@ -1247,6 +1227,10 @@ end
 -->8
 -- game loop
 function _init()
+  -- launch params
+  local p=split(stat(6))
+  _skill,_map_id=tonum(p[1]) or 2,tonum(p[2]) or 1
+
   next_state(play_state)
 end
 
@@ -1412,6 +1396,13 @@ function unpack_special(special,line,sectors,actors)
       -- lerp from current values
       for i=0,speed do
         for _,sector in pairs(doors) do
+          if to=="close" then
+            while sector.things>0 do
+              -- wait 1 sec if door is blocked
+              wait_async(30)
+              sfx(63)
+            end
+          end
           sector.ceil=lerp(ceils[sector],sector[to],i/speed)
         end
         yield()
@@ -1493,9 +1484,11 @@ function unpack_special(special,line,sectors,actors)
   elseif special==243 then
     -- exit level
     return trigger_async(function()
-      -- return to main menu
-      -- todo: go to next level or end game
-      next_state(slicefade_state,levelmenu_state)
+      -- return to main menu if reached last map from group
+      _map_id+=1
+      if(_map_id>#_maps_cart) load(mod_name.."_0.p8")
+      -- next map
+      next_state(slicefade_state,play_state)
     end)
   end
 end
@@ -1913,7 +1906,9 @@ function unpack_map(skill,actors)
       ceiltex=unpack_texture(),
       floortex=unpack_texture(),
       -- rebase to 0-1
-      lightlevel=mpeek()/255
+      lightlevel=mpeek()/255,
+      -- number of things in sector
+      things=0
     })
     -- sector behaviors (if any)
     if special==65 then
@@ -1925,6 +1920,7 @@ function unpack_map(skill,actors)
         end
       end)
     elseif special==84 then
+      -- east scrolling
       sector.tx=rnd(32)
       do_async(function()
         while true do 
@@ -2031,7 +2027,23 @@ function unpack_map(skill,actors)
       -- distance to plane
       unpack_fixed(),
       bbox={},
-      leaf={}})
+      leaf={},
+      -- traverse and renders bsp in back to front order
+      -- calls 'visit' function
+      visit=function(self,pos,visitor)
+        local side=self[1]*pos[1]+self[2]*pos[2]<=self[3]
+        visitor(self,side,pos,visitor)
+        visitor(self,not side,pos,visitor)
+      end,
+      find_sub_sector=function(self,pos)
+        local side=v2_dot(self,pos)<=self[3]
+        if self.leaf[side] then
+          -- leaf?
+          return self[side]
+        end    
+        return self[side]:find_sub_sector(pos)
+      end
+    })
     local flags=mpeek()
     local function unpack_node(side,leaf)
       if leaf then
