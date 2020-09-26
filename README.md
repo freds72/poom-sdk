@@ -1,11 +1,11 @@
 # POOM SDK
 This repository contains everything required to produce a DOOM-like using PICO8, featuring:
-* Complex geometry (slanted walls, stairs, doors...)
-* Textured floors & walls (inc. animated triggers)
+* Complex geometry (slanted walls, stairs, doors, elevators...)
+* Textured floors & walls (inc. animated triggers & textures)
 * Lightning (blinking sectors, light triggers)
 * 8 sided sprites for monsters & props
 * Data driven monsters & props
-* Triggers (opening/closing doors)
+* Triggers (opening/closing doors, elevators, light...)
 * Keys
 * Multiple weapons (bullets & projectiles)
 
@@ -19,7 +19,7 @@ Level building and monster logic uses standard DOOM concepts & editors and is fu
 
 # Credits
 
-Original assets - Id Software (Bethesda)
+Original assets - Id Software (Microsoft)
 
 ZDoom Wiki (outstanding content folks!)
 
@@ -91,8 +91,6 @@ pico8 -home <path to repo> poom.p8
 
 🅾️ + ⬅️➡️: strafe
 
-🅾️ + ⬇️⬆️: switch weapon
-
 ❎: fire
 
 ## Player 1 + 2 keys
@@ -103,9 +101,15 @@ WASD or local variant: back/forward/strafe
 
 ⬅️➡️: turn left/right
 
-🅾️ + ⬇️⬆️: switch weapon
-
 ❎: fire
+
+## Weapon Selection
+
+pause: open weapon selection wheel
+
+pause: regular pico-8 pause menu
+
+⬇️⬆️⬅️➡️: select weapon
 
 # Make a Game!
 ## Level Building
@@ -442,6 +446,134 @@ actor projectile {
     +MISSILE
   }
 ```
+
+## Actor Properties
+
+The following properties can be set in an actor's DECORATE {} block definition. They control various characteristics of your actor, from appearance to behavior or the actor's physical properties. To use, simply specify the property and any associated values on its own line within the actor's definition and outside the state block. 
+
+Supported properties:
+
+### Health _value_
+Defines the health a monster or any other shootable item starts with.
+
+Default is 1000.
+
+### Armor _amount_
+The amount of armor that this item gives.
+
+### Height _value_
+Defines the height of this actor.
+
+Default is 16.
+
+> using very small values can provoke glitches in collision detection.
+
+### Radius _value_
+Defines the radius of this actor.
+
+Default is 20.
+
+> Notes:
+Using very small values can provoke glitches in collision detection.
+The total diameter is double this value, so an actor with a radius of 64 is actually 128 units in length and width, making it impossible for them to navigate through a corridor that's 128 units wide, for example.
+
+### Weapon.SlotNumber _value_
+Default slot for this weapon. 
+
+### Inventory.Amount _value_
+Sets the amount of inventory items given by this item. Mostly used for item types that give larger quantities.
+
+### Inventory.MaxAmount _value_
+Sets the maximum amount the player can carry of this item.
+
+### Damage value
+
+For a projectile defines the damage it inflicts upon impact. The formula is random(1,8) * damage.
+
+Default is 0.
+
+### Speed _value_
+Defines how fast an actor moves. For projectiles this is the distance it moves per tic (1/35 seconds). For monsters it defines the size of one step done in A_Chase. 
+
+Default is 0.
+
+### Weapon.AmmoGive _amount_
+
+The amount of primary ammo you receive from this weapon.
+
+### Weapon.AmmoUse amount
+The amount of primary ammo the weapon uses per shot.
+
+### Inventory.Icon _sprite_
+Defines the icon this item uses when displayed in the HUD or status bar.
+
+_sprite_ is the Pico-8 character code (as given by ord())
+
+### AttackSound _sound_
+Defines the sound the actor makes when attacking.
+
+_sound_ is the sfx id from the user supplied music cart.
+
+### Inventory.PickupSound _sound_
+Defines the sound that is played when a player picks up this item.
+
+_sound_ is the sfx id from the user supplied music cart.
+
+### DeathSound _sound_
+Defines the sound the actor makes when dying or when a projectile explodes. For non-projectiles the death sound must be explicitly played with A_Scream.
+
+_sound_ is the sfx id from the user supplied music cart.
+
+### MeleeRange value
+Specifies the maximum distance to a target where a melee attack inflicts damage. Distance is calculated from the attacker's center to the target's center.
+
+Default is 64.
+
+### MaxTargetRange _value_
+A monster with this property set will not attack its target unless it is within the specified range. This is used by A_Chase and similar functions.
+
+### Weapon.AmmoType _type_
+The type of primary ammo the weapon uses. This must be a valid ammo type.
+
+### Player.StartItem _classname_ [_amount_]
+Adds an item to player's start inventory. First weapon added is the weapon selected at start.
+
+> The initial startitem list is never inherited and must be specified in full for each player class.
+
+## Actor Flags
+
+Flags control various characteristics of your actor, varying from appearance to physical properties. To use, simply specify the flag within the actor's DECORATE definition and outside the state block. You can set or clear a flag as follows:
+
++FLAGNAME sets a flag
+-FLAGNAME clears a flag
+
+Supported flags:
+
+### SOLID
+
+Set when the object should be solid (blocking). The size of the blocking is defined using the height and radius properties.
+> Automatically given by the Monster combo
+
+### SHOOTABLE
+
+Object can be damaged. If health goes below 0 it enters its death state.
+> Automatically given by the Monster combo
+
+### ISMONSTER
+
+Actor is classed as a monster.
+> Automatically given by the Monster combo
+
+### MISSILE
+Actor is a projectile. Actors with this flag set will enter their death state when hitting a solid and constantly move at their speed value (without the need of any actor functions) 
+
+Actors with this flag will also be able to go through impassable linedefs.
+
+> Automatically given by the Projectile combo
+
+
+pack_flag(actor, 'solid') | pack_flag(actor, 'shootable')<<1 | pack_flag(actor, 'missile')<<2 | pack_flag(actor, 'ismonster')<<3
+
 # Music & Sound
 
 Music and sound is totally modable.
@@ -456,6 +588,7 @@ This file can be modified as needed. music+sfx sections will be merged with main
 The following sound effects ID are reserved for game engine use:
 - 62: blocked button/door sound
 - 63: door & platform open/close
+
 
 
 
