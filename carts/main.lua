@@ -1198,7 +1198,7 @@ function play_state()
 end
 
 function gameover_state(pos,angle,target,h)
-  local idle_ttlppop,target_angle=90,angle
+  local idle_ttl,target_angle=90,angle
   return
     -- update
     function()
