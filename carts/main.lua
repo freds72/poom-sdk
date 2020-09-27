@@ -5,7 +5,7 @@ __lua__
 -- globals
 local _bsp,_cam,_plyr,_things,_sprite_cache,_actors
 local _onoff_textures={}
-local _ambientlight,_znear,_zfar,_ammo_factor,_intersectid,_msg=0,8,854,1,0
+local _ambientlight,_ammo_factor,_intersectid,_msg=0,1,0
 local _ui_funcs,_wp_ui={circfill,rectfill,print},split"1,1,63,90,12,2,0,1,2,19,86,49,94,0,1,3,⬅️,52,88,5,0,1,3,shotgun,21,88,11,0,2,2,77,86,111,94,0,2,3,➡️,68,88,5,0,2,3,chaingun,79,88,11,0,3,2,50,68,76,76,0,3,3,⬆️,60,80,5,0,3,3,rocket,52,70,11,0,4,2,50,104,76,112,0,4,3,⬇️,60,96,5,0,4,3,plasma,52,106,11,0"
 
 --local k_far,k_near=0,2
@@ -47,8 +47,8 @@ function make_camera()
         -- x2: fov
         local ax,az=(m1*x+m3*z+m4)<<1,m9*x+m11*z+m12
         -- todo: optimize?
-        if(az>_znear) code=0
-        if(az>_zfar) code|=1
+        if(az>8) code=0
+        if(az>854) code|=1
         if(ax>az) code|=4
         if(-ax>az) code|=8
         outcode&=code
@@ -400,11 +400,11 @@ function draw_flats(v_cache,segs,things)
       local ax,az=
         m1*x+m3*z+m4,
         m9*x+m11*z+m12
-      if(az>_znear) code=0
-      if(az>_zfar) code|=1
+      if(az>8) code=0
+      if(az>854) code|=1
       -- fov adjustment
-      if(-2*ax>az) code|=4
-      if(2*ax>az) code|=8
+      if(-ax<<1>az) code|=4
+      if(ax<<1>az) code|=8
       
       local w=128/az
       v={ax,m8,az,outcode=code,u=x,v=z,x=63.5+ax*w,y=63.5-m8*w,w=w}
@@ -418,7 +418,7 @@ function draw_flats(v_cache,segs,things)
   end
   -- out of screen?
   if outcode==0 then
-    if(nearclip!=0) verts=z_poly_clip(_znear,verts)
+    if(nearclip!=0) verts=z_poly_clip(verts)
     if #verts>2 then
       local sector=segs.sector
       local light=max(sector.lightlevel,_ambientlight)
@@ -440,7 +440,7 @@ function draw_flats(v_cache,segs,things)
           local x,y=thing[1],thing[2]
           local ax,az=m1*x+m3*y+m4,m9*x+m11*y+m12
           -- todo: take radius into account 
-          if az>_znear and az<_zfar and ax<az and -ax<az then
+          if az>8 and az<854 and ax<az and -ax<az then
             -- h: thing offset+cam offset
             local w,h=128/az,thing[3]+m8
             local x,y=63.5+ax*w,63.5-h*w
@@ -470,7 +470,7 @@ function draw_flats(v_cache,segs,things)
         local x,y=thing[1],thing[2]
         local ax,az=m1*x+m3*y+m4,m9*x+m11*y+m12
         -- todo: take radius into account 
-        if az>_znear and az<_zfar and ax<az and -ax<az then
+        if az>8 and az<854 and ax<az and -ax<az then
           -- h: thing offset+cam offset
           local w,h=128/az,thing[3]+m8
           local x,y=63.5+ax*w,63.5-h*w
@@ -984,7 +984,6 @@ function attach_plyr(thing,actor,skill)
         wp_hud=not btn(6)
         for i=1,4 do
           if btnp(🅾️) then
-            -- hardcoded switch to fist
             wp_hud=wp_switch(10)
           elseif btnp(i-1) then
             -- only switch if we have the weapon and it's not the current weapon
@@ -1137,6 +1136,9 @@ function next_state(fn,...)
 end
 
 function play_state()
+  -- stop music (eg. restart game)
+  music(-1)
+
   -- actor sprites
   if not _actors then
     -- not already loaded?
@@ -1146,10 +1148,11 @@ function play_state()
   _sprite_cache:clear()  
 
   -- memory cleanup before loading a level
-  _things,_bsp={}
+  _things,_plyr,_bsp={}
   -- ammo scaling factor
   _ammo_factor=split"2,1,1,1"[_skill]
-  _bsp,thingdefs=decompress(mod_name.."_"..mod_map,_maps_cart[_map_id],_maps_offset[_map_id],unpack_map,_skill,_actors)
+  local bsp,thingdefs=decompress(mod_name.."_"..mod_map,_maps_cart[_map_id],_maps_offset[_map_id],unpack_map,_skill,_actors)
+  _bsp=bsp
 
   -- restore main data cart
   reload()
@@ -1327,12 +1330,12 @@ local function v_clip(v0,v1,t)
     }
 end
 
-function z_poly_clip(znear,v)
+function z_poly_clip(v)
   local res,v0={},v[#v]
-	local d0=v0[3]-znear
+	local d0=v0[3]-8
 	for i=1,#v do
 		local v1=v[i]
-		local d1=v1[3]-znear
+		local d1=v1[3]-8
 		if d1>0 then
       if d0<=0 then
         res[#res+1]=v_clip(v0,v1,d0/(d0-d1))
