@@ -134,7 +134,7 @@ function vspr(frame,sx,sy,scale,flipx)
   local sw,xscale=xoffset*scale,flipx and -scale or scale
   sx-=sw
   -- todo: bug?
-  -- if(flipx) sx+=sw  
+  if(flipx) sx+=sw  
 	sy-=yoffset*scale
 	for i,tile in pairs(tiles) do
     local dx,dy,ssx,ssy=sx+(i%w)*xscale,sy+(i\w)*scale,_sprite_cache:use(tile)
@@ -278,11 +278,9 @@ function polyfill(v,xoffset,yoffset,tex,light)
       x0+=dx
       w0+=dw
     end		
-    -- "exploit" known bug: local decl is faster than assigns unless a sum(!!)
-    -- to be removed when: https://www.lexaloffle.com/bbs/?tid=39090 is fixed	
-    x0=_x1+0
-    y0=_y1+0
-    w0=_w1+0
+    x0=_x1
+    y0=_y1
+    w0=_w1
   end
 end
 
@@ -352,7 +350,7 @@ function draw_walls(segs,v_cache,light)
             local ot=y0-otop*w0
             tline(x,ct,x,ot,u0/w0,(ct-t)/w0+yoffset,0,1/w0)
             -- new window top
-            t=ot+0
+            t=ot
             ct=ot\1+1
           end
           -- bottom wall side between current sector and back sector     
@@ -362,7 +360,7 @@ function draw_walls(segs,v_cache,light)
             local cob=ob\1+1
             tline(x,cob,x,b,u0/w0,(cob-ob)/w0,0,1/w0)
             -- new window bottom
-            b=ob+0
+            b=ob
           end
   
           -- middle wall?
@@ -378,11 +376,9 @@ function draw_walls(segs,v_cache,light)
       end
     end
     v0=v1
-    -- "exploit" known bug: local decl is faster than assigns unless a sum(!!)
-    -- to be removed when: https://www.lexaloffle.com/bbs/?tid=39090 is fixed
-    x0=_x1+0
-    y0=y1+0
-    w0=w1+0
+    x0=_x1
+    y0=y1
+    w0=w1
   end
 end
 
@@ -700,7 +696,7 @@ function line_of_sight(thing,otherthing,maxdist)
   return n
 end
 
-function make_thing(actor,x,y,z,angle)
+function make_thing(actor,x,y,z,angle,special)
    -- all sub-sectors that thing touches
   -- used for rendering and collision detection
   local pos={x,y}
@@ -713,7 +709,8 @@ function make_thing(actor,x,y,z,angle)
     angle=angle,
     sector=ss.sector,
     ssector=ss,
-    subs={}
+    subs={},
+    trigger=special
   })
   
   if actor.flags&0x2>0 then
@@ -908,6 +905,8 @@ function with_health(thing)
     self.dead=true
     -- lock state
     dead=true
+    -- any special?
+    if(self.trigger) self:trigger()
     -- death state
     self:jump_to(5)
   end
@@ -1383,125 +1382,70 @@ function unpack_bbox()
   return {l,b,l,t,r,t,r,b}
 end
 
-function unpack_special(special,line,sectors,actors)
-  local function switch_texture()
-    line[true].midtex=_onoff_textures[line[true].midtex]
-  end
-  -- helper function - handles lock & repeat
-  local function trigger_async(fn,actorlock)
-    return function(thing)
-      -- need lock?
-      if actorlock then
-        -- keep key in inventory (for reusable locked doors)
-        if not thing.inventory[actorlock] then 
-          _msg="need key"
-          -- play "err" sound
-          sfx(62)
-          return
-        end
-      end
-
-      -- backup trigger
-      local trigger=line.trigger
-      -- avoid reentrancy
-      line.trigger=nil
-      --
-      switch_texture()
-      do_async(function()
-        fn()
-        -- unlock (if repeatable)
-        if(line.flags&32>0) line.trigger=trigger switch_texture()
-      end)
-    end
-  end
-
-  if special==202 then
+function unpack_special(special,trigger_async,sectors,actors)
+  local function unpack_moving_sectors(what)
     -- sectors
-    local doors={}
+    local moving_sectors={}
     -- backup heights
     unpack_array(function()
       local sector=sectors[unpack_variant()]
-      -- safe for replay init values
-      sector.close=sector.close or sector.floor
-      sector.open=sector.open or sector.ceil
-      add(doors,sector)
+      -- backup changing property (to allow reentrancy)
+      sector.init=sector.init or sector[what]
+      sector.target=unpack_fixed()
+      add(moving_sectors,sector)
     end)
-    local speed,kind,delay,lock=mpeek(),mpeek(),mpeek(),unpack_variant()
+    local moving_speed,delay,lock=128-mpeek(),unpack_variant(),unpack_variant()
     local function move_async(to,speed)
+      speed=speed or moving_speed
       -- play open/close sound
       sfx(63)
 
       -- take current values
-      local ceils={}
-      for _,sector in pairs(doors) do
-        ceils[sector]=sector.ceil
+      local current={}
+      for _,sector in pairs(moving_sectors) do
+        current[sector]=sector[what]
       end
       -- lerp from current values
       for i=0,speed do
-        for _,sector in pairs(doors) do
-          if to=="close" then
+        for _,sector in pairs(moving_sectors) do
+          -- avoid crushing things
+          if to=="floor" then
             while sector.things>0 do
               -- wait 1 sec if door is blocked
               wait_async(30)
               sfx(63)
             end
           end
-          sector.ceil=lerp(ceils[sector],sector[to],i/speed)
+          sector[what]=lerp(current[sector],sector[to],i/speed)
         end
         yield()
       end
     end
     -- init
-    if kind&2==0 then
-      move_async("close",1)
-    else
-      move_async("open",1)
+    if special==13 then
+      -- close door
+      move_async("floor",1)
     end
-    return trigger_async(function()  
-      if kind&2==0 then
-        move_async("open",speed)
+    return trigger_async(function()
+      if special==10 then
+        move_async("init")  
       else
-        move_async("close",speed)
-      end
-      if kind==0 then
-        wait_async(delay)
-        move_async("close",speed)
-      elseif kind==2 then
-        wait_async(delay)
-        move_async("open",speed)
-      end
+        -- platform
+        move_async("target")
+        if delay>0 then
+          wait_async(delay)
+          move_async(special==13 and "floor" or "init")
+        end
+      end      
     end,
     -- lock id 0 is no lock
-    actors[lock])  
+    actors[lock]) 
+  end
+
+  if special==13 then
+    return unpack_moving_sectors("ceil")
   elseif special==64 then
-    -- todo: unify with doors??
-    -- elevator raise
-    local sector,target_floor,speed=sectors[unpack_variant()],unpack_fixed(),128-mpeek()
-    -- backup initial height
-    local orig_floor=sector.floor
-    local function move_async(from,to)
-      -- todo: configurable wait time
-      wait_async(30)
-      -- play open/close sound
-      sfx(63)
-      for i=0,speed do
-        sector.floor=lerp(from,to,smoothstep(i/speed))
-        yield()
-      end
-      -- avoid drift
-      sector.floor=to
-    end
-    return function()
-      -- avoid reentrancy
-      if(sector.moving) return
-      -- lock (from any other trigger)
-      sector.moving=true
-      do_async(function()
-        move_async(orig_floor,target_floor)
-        move_async(target_floor,orig_floor)
-        sector.moving=nil
-      end)
-    end
+    return unpack_moving_sectors("floor")
   elseif special==112 then
     -- sectors
     local target_sectors={}
@@ -1976,10 +1920,43 @@ function unpack_map(skill,actors)
       -- sides
       [true]=sides[unpack_variant()],
       [false]=sides[unpack_variant()],
-      flags=mpeek()}
+      flags=mpeek()}      
     -- special actions
     if line.flags&0x2>0 then
-      line.trigger=unpack_special(mpeek(),line,sectors,actors)
+      local function switch_texture()
+        line[true].midtex=_onoff_textures[line[true].midtex]
+      end             
+      line.trigger=unpack_special(
+        mpeek(),
+        -- helper function - handles lock & repeat
+        function(fn,actorlock)
+          return function(thing)
+            -- need lock?
+            if actorlock then
+              -- keep key in inventory (for reusable locked doors)
+              if not thing.inventory[actorlock] then 
+                _msg="need key"
+                -- play "err" sound
+                sfx(62)
+                return
+              end
+            end
+
+            -- backup trigger
+            local trigger=line.trigger
+            -- avoid reentrancy
+            line.trigger=nil
+            --
+            switch_texture()
+            do_async(function()
+              fn()
+              -- unlock (if repeatable)
+              if(line.flags&32>0) line.trigger=trigger switch_texture()
+            end)
+          end
+        end,
+        sectors,
+        actors)
     end
     add(lines,line)
   end)
@@ -2090,10 +2067,10 @@ function unpack_map(skill,actors)
 
   -- things
   local things={}
-  unpack_array(function()
+  local function unpack_thing()
     local flags,id,x,y=mpeek(),unpack_variant(),unpack_fixed(),unpack_fixed()
     if flags&(0x10<<(skill-1))!=0 then
-      add(things,{
+      return add(things,{
         -- link to underlying actor
         actors[id],
         -- coordinates
@@ -2101,10 +2078,31 @@ function unpack_map(skill,actors)
         -- height
         0,
         -- angle
-        (flags&0xf)/8,
+        (flags&0xf)/8
       })
     end
-  end)
+  end
+  -- standard things
+  unpack_array(unpack_thing)
+
+  -- things with special behaviors
+  unpack_array(function()
+    local thing=unpack_thing()
+    if thing then
+      add(thing,unpack_special(
+        mpeek(),
+        function(fn)
+          return function(self)
+            -- avoid reentrancy
+            self.trigger=nil
+            --
+            do_async(fn)
+          end
+        end,
+        sectors,
+        actors))        
+    end
+  end)    
 
   -- restore main cart
   return nodes[#nodes],things
