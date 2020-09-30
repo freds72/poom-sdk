@@ -79,8 +79,10 @@ end
 -- coroutine helpers
 local _futures={}
 -- registers a new coroutine
+-- returns a handle to the coroutine
+-- used to cancel a coroutine
 function do_async(fn)
-  add(_futures,cocreate(fn))
+  return add(_futures,{cocreate(fn)})
 end
 -- wait until timer
 function wait_async(t,fn)
@@ -129,13 +131,11 @@ end
 function vspr(frame,sx,sy,scale,flipx)
   -- faster equivalent to: palt(0,false)
   poke(0x5f00,0)
-  local w,xoffset,yoffset,tc,tiles=unpack(frame)
+  local xscale,w,xoffset,yoffset,tc,tiles=scale,unpack(frame)
   palt(tc,true)
-  local sw,xscale=xoffset*scale,flipx and -scale or scale
-  sx-=sw
-  -- todo: bug?
-  if(flipx) sx+=sw  
-	sy-=yoffset*scale
+  if(flipx) xoffset,xscale=1-xoffset,-scale
+  sx-=xoffset*scale
+  sy-=yoffset*scale
 	for i,tile in pairs(tiles) do
     local dx,dy,ssx,ssy=sx+(i%w)*xscale,sy+(i\w)*scale,_sprite_cache:use(tile)
     -- scale sub-pixel fix 
@@ -1284,12 +1284,14 @@ function _update()
 
   -- any futures?
   local tmp={}
-	for k,f in pairs(_futures) do
-		local cs=costatus(f)
-		if cs=="suspended" then
+  for k,async_handle in pairs(_futures) do
+    local f=async_handle[1]
+    -- still active?
+    if f and costatus(f)=="suspended" then
+      -- todo: remove assert for release
       assert(coresume(f))
-      add(tmp,f)
-		end
+      add(tmp,async_handle)
+    end
   end
   _futures=tmp
 
@@ -1388,55 +1390,60 @@ function unpack_special(special,trigger_async,sectors,actors)
     local moving_sectors={}
     -- backup heights
     unpack_array(function()
-      local sector=sectors[unpack_variant()]
-      -- backup changing property (to allow reentrancy)
-      sector.init=sector.init or sector[what]
+      local sector=sectors[unpack_variant()]      
+      -- "stable" state = always floor
+      sector.init=sector.floor
       sector.target=unpack_fixed()
       add(moving_sectors,sector)
     end)
-    local moving_speed,delay,lock=128-mpeek(),unpack_variant(),unpack_variant()
-    local function move_async(to,speed)
-      speed=speed or moving_speed
+    -- door speed: https://zdoom.org/wiki/Map_translator#Constants
+    -- speed is signed (]-32;32[)
+    local moving_speed,delay,lock=(mpeek()-128)/8,unpack_variant(),unpack_variant()
+    local function move_sector_async(sector,to,speed,no_crush)
       -- play open/close sound
       sfx(63)
 
-      -- take current values
-      local current={}
-      for _,sector in pairs(moving_sectors) do
-        current[sector]=sector[what]
-      end
-      -- lerp from current values
-      for i=0,speed do
-        for _,sector in pairs(moving_sectors) do
-          -- avoid crushing things
-          if to=="floor" then
-            while sector.things>0 do
-              -- wait 1 sec if door is blocked
-              wait_async(30)
-              sfx(63)
-            end
+      local hmax=sector[to]
+      while true do
+        -- avoid crushing things
+        if no_crush then
+          while sector.things>0 do
+            -- wait 1 sec if door is blocked
+            wait_async(30)
+            sfx(63)
           end
-          sector[what]=lerp(current[sector],sector[to],i/speed)
+        end          
+        local h=sector[what]+speed
+        if (speed>0 and h>hmax) or (speed<0 and h<hmax) then          
+          sector[what]=hmax
+          break
         end
+        sector[what]=h
         yield()
       end
     end
     -- init
     if special==13 then
-      -- close door
-      move_async("floor",1)
+      -- close doors
+      for _,sector in pairs(moving_sectors) do
+        sector.ceil=sector.floor
+      end
     end
+
     return trigger_async(function()
-      if special==10 then
-        move_async("init")  
-      else
-        -- platform
-        move_async("target")
-        if delay>0 then
-          wait_async(delay)
-          move_async(special==13 and "floor" or "init")
-        end
-      end      
+      -- move to target
+      for _,sector in pairs(moving_sectors) do
+        -- kill any previous moving handler
+        if(sector.action) sector.action[1]=nil
+        sector.action=do_async(function()
+          move_sector_async(sector,"target",moving_speed,special==13 and moving_speed<0)
+          if delay>0 then
+            wait_async(delay)
+            -- 
+            move_sector_async(sector,"init",-moving_speed,special==13 and moving_speed>0)
+          end
+        end)
+      end
     end,
     -- lock id 0 is no lock
     actors[lock]) 
@@ -1948,11 +1955,19 @@ function unpack_map(skill,actors)
             line.trigger=nil
             --
             switch_texture()
-            do_async(function()
-              fn()
-              -- unlock (if repeatable)
-              if(line.flags&32>0) line.trigger=trigger switch_texture()
-            end)
+            -- do the action *outside* of a coroutine
+            fn()
+            -- repeatable?
+            if line.flags&32>0 then
+              do_async(function()
+                -- avoid player hitting trigger/button right away
+                wait_async(30)
+                -- unlock (if repeatable)
+                line.trigger=trigger 
+                -- restore visual
+                switch_texture()
+              end)
+            end
           end
         end,
         sectors,
@@ -2096,7 +2111,7 @@ function unpack_map(skill,actors)
             -- avoid reentrancy
             self.trigger=nil
             --
-            do_async(fn)
+            fn()
           end
         end,
         sectors,
