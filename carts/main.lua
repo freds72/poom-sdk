@@ -4,7 +4,7 @@ __lua__
 
 -- globals
 local _bsp,_cam,_plyr,_things,_sprite_cache,_actors
-local _onoff_textures={}
+local _onoff_textures={[0]=0}
 local _ambientlight,_ammo_factor,_intersectid,_msg=0,1,0
 local _ui_funcs,_wp_ui={circfill,rectfill,print},split"1,1,63,90,12,2,0,1,2,19,86,49,94,0,1,3,⬅️,52,88,5,0,1,3,shotgun,21,88,11,0,2,2,77,86,111,94,0,2,3,➡️,68,88,5,0,2,3,chaingun,79,88,11,0,3,2,50,68,76,76,0,3,3,⬆️,60,80,5,0,3,3,rocket,52,70,11,0,4,2,50,104,76,112,0,4,3,⬇️,60,96,5,0,4,3,plasma,52,106,11,0"
 
@@ -82,7 +82,7 @@ local _futures={}
 -- returns a handle to the coroutine
 -- used to cancel a coroutine
 function do_async(fn)
-  return add(_futures,{cocreate(fn)})
+  return add(_futures,{co=cocreate(fn)})
 end
 -- wait until timer
 function wait_async(t,fn)
@@ -174,7 +174,6 @@ function make_sprite_cache(tiles,maxlen)
 	end
 	
 	return {
-    clear=function()  len,index,first,last=0,{} end,
     use=function(self,id)
 			local entry=index[id]
 			if entry then
@@ -226,6 +225,23 @@ end
 
 -->8
 -- bsp rendering
+
+-- traverse and renders bsp in back to front order
+-- calls 'visit' function
+function visit_bsp(node,pos,visitor)
+  local side=node[1]*pos[1]+node[2]*pos[2]<=node[3]
+  visitor(node,side,pos,visitor)
+  visitor(node,not side,pos,visitor)
+end
+
+function find_sub_sector(node,pos)
+  local side=v2_dot(node,pos)<=node[3]
+  if node.leaf[side] then
+    -- leaf?
+    return node[side]
+  end    
+  return find_sub_sector(node[side],pos)
+end
 
 -- floor/ceiling n-gon filling routine
 -- xoffset: used as texture offset
@@ -299,80 +315,83 @@ function draw_walls(segs,v_cache,light)
     if x0<x1 and ldef then
       -- span rasterization
       -- pick correct texture "major"
-      local dx,u0=x1-x0,v0[seg[7]]*w0
+      local dx,u0=x1-x0,v0[seg[9]]*w0
 
       -- dual?
       local facingside,otherside,otop,obottom=ldef[seg.side],ldef[not seg.side]
       -- peg bottom?
-      local yoffset,toptex,midtex,bottomtex=bottom-top,facingside.toptex,facingside.midtex,facingside.bottomtex
-      -- fix animated side walls (elevators)
-      if ldef.flags&0x4!=0 then
-        yoffset=0
-      end
-      if otherside then
-        -- visible other side walls?
-        otop=otherside.sector.ceil>>4
-        obottom=otherside.sector.floor>>4
-        -- offset animated walls (doors)
+      local yoffset,_,toptex,midtex,bottomtex=bottom-top,unpack(facingside)
+      -- no need to draw untextured walls
+      if toptex|midtex|bottomtex!=0 then
+        -- fix animated side walls (elevators)
         if ldef.flags&0x4!=0 then
-          yoffset=otop-top
+          yoffset=0
         end
-        -- make sure bottom is not crossing this side top
-        obottom=min(top,obottom)
-        otop=max(bottom,otop)
-        if(top<=otop) otop=nil
-        if(bottom>=obottom) obottom=nil
-        -- kill top/bottom if no textures
-        otop=toptex and otop
-        obottom=bottomtex and obottom
-      end
-
-      local cx0,dy,du,dw=x0\1+1,(y1-y0)/dx,(v1[seg[7]]*w1-u0)/dx,((w1-w0)<<4)/dx
-      w0<<=4
-      local sx=cx0-x0    
-      if(x0<0) y0-=x0*dy u0-=x0*du w0-=x0*dw cx0=0 sx=0
-      y0+=sx*dy
-      u0+=sx*du
-      w0+=sx*dw
-      
-      if(x1>127) x1=127
-      for x=cx0,x1\1 do
-        if w0>2.4 then
-          -- top/bottom+color shifing
-          local t,b,pal1=y0-top*w0,y0-bottom*w0,(light*min(15,w0<<1))\1
-          if(pal0!=pal1) memcpy(0x5f00,0x4300|pal1<<4,16) pal0=pal1
-
-          -- top wall side between current sector and back sector
-          local ct=t\1+1
-
-          if otop then
-            poke4(0x5f38,toptex)             
-            local ot=y0-otop*w0
-            tline(x,ct,x,ot,u0/w0,(ct-t)/w0+yoffset,0,1/w0)
-            -- new window top
-            t=ot
-            ct=ot\1+1
+        if otherside then
+          -- visible other side walls?
+          otop=otherside[1].ceil>>4
+          obottom=otherside[1].floor>>4
+          -- offset animated walls (doors)
+          if ldef.flags&0x4!=0 then
+            yoffset=otop-top
           end
-          -- bottom wall side between current sector and back sector     
-          if obottom then
-            poke4(0x5f38,bottomtex)             
-            local ob=y0-obottom*w0
-            local cob=ob\1+1
-            tline(x,cob,x,b,u0/w0,(cob-ob)/w0,0,1/w0)
-            -- new window bottom
-            b=ob
-          end
-  
-          -- middle wall?
-          if midtex then
-            -- texture selection
-            poke4(0x5f38,midtex)
-            tline(x,ct,x,b,u0/w0,(ct-t)/w0+yoffset,0,1/w0)
-          end
+          -- make sure bottom is not crossing this side top
+          obottom=min(top,obottom)
+          otop=max(bottom,otop)
+          if(top<=otop) otop=nil
+          if(bottom>=obottom) obottom=nil
+          -- kill top/bottom if no textures (eg 0)
+          otop=toptex!=0 and otop
+          obottom=bottomtex!=0 and obottom
         end
-        y0+=dy
-        u0+=du
-        w0+=dw
+
+        local cx0,dy,du,dw=x0\1+1,(y1-y0)/dx,(v1[seg[9]]*w1-u0)/dx,((w1-w0)<<4)/dx
+        w0<<=4
+        local sx=cx0-x0    
+        if(x0<0) y0-=x0*dy u0-=x0*du w0-=x0*dw cx0=0 sx=0
+        y0+=sx*dy
+        u0+=sx*du
+        w0+=sx*dw
+        
+        if(x1>127) x1=127
+        for x=cx0,x1\1 do
+          if w0>2.4 then
+            -- top/bottom+color shifing
+            local t,b,pal1=y0-top*w0,y0-bottom*w0,(light*min(15,w0<<1))\1
+            if(pal0!=pal1) memcpy(0x5f00,0x4300|pal1<<4,16) pal0=pal1
+
+            -- top wall side between current sector and back sector
+            local ct=t\1+1
+
+            if otop then
+              poke4(0x5f38,toptex)             
+              local ot=y0-otop*w0
+              tline(x,ct,x,ot,u0/w0,(ct-t)/w0+yoffset,0,1/w0)
+              -- new window top
+              t=ot
+              ct=ot\1+1
+            end
+            -- bottom wall side between current sector and back sector     
+            if obottom then
+              poke4(0x5f38,bottomtex)             
+              local ob=y0-obottom*w0
+              local cob=ob\1+1
+              tline(x,cob,x,b,u0/w0,(cob-ob)/w0,0,1/w0)
+              -- new window bottom
+              b=ob
+            end
+    
+            -- middle wall?
+            if midtex!=0 then
+              -- texture selection
+              poke4(0x5f38,midtex)
+              tline(x,ct,x,b,u0/w0,(ct-t)/w0+yoffset,0,1/w0)
+            end   
+          end
+          y0+=dy
+          u0+=du
+          w0+=dw
+        end
       end
     end
     v0=v1
@@ -419,8 +438,8 @@ function draw_flats(v_cache,segs,things)
       local sector=segs.sector
       local light=max(sector.lightlevel,_ambientlight)
       -- no texture = sky/background
-      if(sector.floortex and sector.floor+m8<0) polyfill(verts,sector.tx or 0,sector.floor,sector.floortex,light)
-      if(sector.ceiltex and sector.ceil+m8>0) polyfill(verts,0,sector.ceil,sector.ceiltex,light)
+      if(sector.floortex!=0 and sector.floor+m8<0) polyfill(verts,sector.tx or 0,sector.floor,sector.floortex,light)
+      if(sector.ceiltex!=0 and sector.ceil+m8>0) polyfill(verts,0,sector.ceil,sector.ceiltex,light)
 
       -- walls
       draw_walls(segs,verts,light)
@@ -525,9 +544,9 @@ end
 function unregister_thing_subs(thing)
   -- remove self from sectors (multiple)
   local not_missile=thing.actor.flags&0x4==0
-  for ss,_ in pairs(thing.subs) do
-    ss.things[thing]=nil
-    if(not_missile) ss.sector.things-=1
+  for node,_ in pairs(thing.subs) do
+    if(node.things) node.things[thing]=nil
+    if(not_missile) node.sector.things-=1
   end
 end
 
@@ -537,6 +556,7 @@ function register_thing_subs(node,thing,radius)
     -- thing -> sector
     thing.subs[node]=true
     -- reverse
+    if(not node.things) node.things={}
     node.things[thing]=true
     -- don't count missile actors
     if(thing.actor.flags&0x4==0) node.sector.things+=1
@@ -559,7 +579,7 @@ end
 -- t: impact depth (to fix velocity)
 -- ti: impact on velocity vector
 function intersect_sub_sector(segs,p,d,tmin,tmax,radius,res,skipthings)
-  local intersectid,_tmax,px,pz,dx,dz,othersector=_intersectid,tmax,p[1],p[2],d[1],d[2]
+  local intersectid,_tmax,px,py,dx,dy,othersector=_intersectid,tmax,p[1],p[2],d[1],d[2]
 
   if not skipthings then
     -- hitting things?
@@ -571,7 +591,7 @@ function intersect_sub_sector(segs,p,d,tmin,tmax,radius,res,skipthings)
       -- not dead
       if thing.intersectid!=intersectid and actor.flags&0x4==0 and not thing.dead then
         -- overflow 'safe' coordinates
-        local m,r={(px-thing[1])>>8,(pz-thing[2])>>8},(actor.radius+radius)>>8
+        local m,r={(px-thing[1])>>8,(py-thing[2])>>8},(actor.radius+radius)>>8
         local b,c=v2_dot(m,d),v2_dot(m,m)-r*r
 
         -- check distance and ray direction vs. circle
@@ -608,29 +628,29 @@ function intersect_sub_sector(segs,p,d,tmin,tmax,radius,res,skipthings)
   end
 
   for _,s0 in ipairs(segs) do
-    local n=s0[5]
-    local denom,dist_a=v2_dot(n,d),s0[6]-v2_dot(n,p)
+    local n={s0[6],s0[7]}
+    local denom,dist_a=v2_dot(n,d),s0[8]-v2_dot(n,p)
     if denom>0 then
       local t=dist_a/denom
       -- within seg?
       local pt={
         px+t*dx,
-        pz+t*dz
+        py+t*dy
       }
-      local d=v2_dot(s0[2],pt)-s0[3]
+      local d=v2_dot({s0[2],s0[3]},pt)-s0[4]
       -- extended segment
-      if d>=-radius and d<s0[4]+radius then
+      if d>=-radius and d<s0[5]+radius then
         -- moving away
         if denom<0 then
           if(t>tmin) tmin=t
           if(tmin>tmax) return
         else -- moving in
-          local dist_b=s0[6]-v2_dot(n,{px+_tmax*dx,pz+_tmax*dz})
+          local dist_b=s0[8]-v2_dot(n,{px+_tmax*dx,py+_tmax*dy})
           if s0.line and (dist_a<radius or dist_b<radius) then
             add(res,{ti=t,t=mid((dist_a-1/32)/(dist_a-dist_b),0,1),seg=s0,n=n})
           end
           -- exact segment
-          if d>=0 and d<s0[4] then
+          if d>=0 and d<s0[5] then
             if(t<tmax) tmax=t othersector=s0.partner
             if(tmax<tmin) return 
           end
@@ -677,7 +697,12 @@ end
 
 -- returns distance and normal to target (if visible)
 function line_of_sight(thing,otherthing,maxdist)
+  -- pvs check
+  local pvs,id=thing.ssector.pvs,otherthing.ssector.id
+
   local n,d=v2_normal(v2_make(thing,otherthing))
+  if(band(pvs[id\32],0x0.0001<<(id&31))==0) return n
+
   -- in radius?
   d=max(d-thing.actor.radius)
   if d<maxdist then
@@ -685,7 +710,7 @@ function line_of_sight(thing,otherthing,maxdist)
     local h,hits,blocking=thing[3]+24,{}
     _intersectid+=1
     intersect_sub_sector(thing.ssector,thing,n,0,d,0,hits,true)
-    for _,hit in pairs(hits) do
+    for _,hit in ipairs(hits) do
       if intersect_line(hit.seg,h,0,0,true) then
         return n
       end
@@ -701,7 +726,7 @@ function make_thing(actor,x,y,z,angle,special)
   -- used for rendering and collision detection
   local pos={x,y}
   -- default height & sector specs
-  local ss=_bsp:find_sub_sector(pos)
+  local ss=find_sub_sector(_bsp,pos)
   -- attach instance properties to new thing
   local thing=actor:attach({
     -- z: altitude
@@ -737,10 +762,10 @@ function intersect_line(seg,h,height,clearance,is_missile,is_monster)
   return otherside==nil or 
     -- impassable
     (not is_missile and ldef.flags&0x40>0) or
-    h+height>otherside.sector.ceil or 
-    h+clearance<otherside.sector.floor or 
+    h+height>otherside[1].ceil or 
+    h+clearance<otherside[1].floor or 
     -- avoid monster jumping off cliffs
-    (is_monster and h-otherside.sector.floor>clearance)
+    (is_monster and h-otherside[1].floor>clearance)
 end
 
 function intersect_thing(otherthing,h,radius)
@@ -838,7 +863,7 @@ function with_physic(thing)
         v2_add(self,velocity)
 
         -- refresh sector after fixed collision
-        ss=_bsp:find_sub_sector(self)
+        ss=find_sub_sector(_bsp,self)
         self.sector=ss.sector
         self.ssector=ss
 
@@ -1102,7 +1127,7 @@ function draw_bsp()
   local pvs,v_cache=_plyr.ssector.pvs,{}
 
   -- visit bsp
-  _bsp:visit(_plyr,function(node,side,pos,visitor)
+  visit_bsp(_bsp,_plyr,function(node,side,pos,visitor)
     side=not side
     if node.leaf[side] then
       local subs=node[side]
@@ -1113,7 +1138,7 @@ function draw_bsp()
         draw_flats(v_cache,subs)
       end
     elseif _cam:is_visible(node.bbox[side]) then
-      node[side]:visit(pos,visitor)
+      visit_bsp(node[side],pos,visitor)
     end
   end)
 end
@@ -1122,6 +1147,7 @@ end
 -- game states
 function next_state(fn,...)
   btns,wp_hud={}
+  
   local u,d,i=fn(...)
   -- ensure update/draw pair is consistent
   _update_state=function()
@@ -1138,25 +1164,18 @@ function play_state()
   -- stop music (eg. restart game)
   music(-1)
 
-  -- actor sprites
-  if not _actors then
-    -- not already loaded?
-    _actors,_sprite_cache=decompress(mod_name,0,0,unpack_actors)
-  end
-  -- fix garbage sprites when loading 2nd map
-  _sprite_cache:clear()  
+  _actors,_sprite_cache=decompress(mod_name,0,0,unpack_actors)
 
-  -- memory cleanup before loading a level
-  _things,_plyr,_bsp={}
   -- ammo scaling factor
   _ammo_factor=split"2,1,1,1"[_skill]
-  local bsp,thingdefs=decompress(mod_name.."_"..mod_map,_maps_cart[_map_id],_maps_offset[_map_id],unpack_map,_skill,_actors)
+  local bsp,thingdefs=decompress(_maps_group[_map_id],_maps_cart[_map_id],_maps_offset[_map_id],unpack_map,_skill,_actors)
   _bsp=bsp
 
   -- restore main data cart
   reload()
 
   -- attach behaviors to things
+  _things={}
   for _,thingdef in pairs(thingdefs) do 
     local thing,actor=make_thing(unpack(thingdef))
     -- get direct access to player
@@ -1285,7 +1304,8 @@ function _update()
   -- any futures?
   local tmp={}
   for k,async_handle in pairs(_futures) do
-    local f=async_handle[1]
+    -- get actual coroutine
+    local f=async_handle.co
     -- still active?
     if f and costatus(f)=="suspended" then
       -- todo: remove assert for release
@@ -1384,7 +1404,8 @@ function unpack_bbox()
   return {l,b,l,t,r,t,r,b}
 end
 
-function unpack_special(special,trigger_async,sectors,actors)
+function unpack_special(sectors,actors)
+  local special=mpeek()
   local function unpack_moving_sectors(what)
     -- sectors
     local moving_sectors={}
@@ -1430,11 +1451,12 @@ function unpack_special(special,trigger_async,sectors,actors)
       end
     end
 
-    return trigger_async(function()
+    return function()
       -- move to target
       for _,sector in pairs(moving_sectors) do
         -- kill any previous moving handler
-        if(sector.action) sector.action[1]=nil
+        if(sector.action) sector.action.co=nil
+        -- register an async routine
         sector.action=do_async(function()
           move_sector_async(sector,"target",moving_speed,special==13 and moving_speed<0)
           if delay>0 then
@@ -1446,7 +1468,7 @@ function unpack_special(special,trigger_async,sectors,actors)
       end
     end,
     -- lock id 0 is no lock
-    actors[lock]) 
+    actors[lock]
   end
 
   if special==13 then
@@ -1460,26 +1482,20 @@ function unpack_special(special,trigger_async,sectors,actors)
       add(target_sectors,sectors[unpack_variant()])
     end)
     local lightlevel=mpeek()/255
-    return trigger_async(function()
+    return function()
       for _,sector in pairs(target_sectors) do
         sector.lightlevel=lightlevel
       end
-    end)
+    end
   elseif special==243 then
     -- exit level
-    return trigger_async(function()
-      -- return to main menu if reached last map from group
+    return function()
+      -- load next map
+      -- todo: handle end game
       _map_id+=1
-      if(_map_id>#_maps_cart) load(mod_name.."_0.p8")
-      -- next map
-      next_state(slicefade_state,play_state)
-    end)
+      load(_maps_group[_map_id]..".p8",nil,_skill..",".._map_id)
+    end
   end
-end
-
-function unpack_texture()
-  local tex=unpack_fixed()
-  return tex!=0 and tex
 end
 
 function unpack_actors()
@@ -1507,6 +1523,188 @@ function unpack_actors()
   -- inventory & things
   local unpack_actor_ref=function()
     return actors[unpack_variant()]
+  end
+
+  -- actor properties + skill ammo factor
+  local properties_factory={
+    {0x0.0001,"health"},
+    {0x0.0002,"armor"},
+    {0x0.0004,"amount"},
+    {0x0.0008,"maxamount"},
+    -- convert icon code into character
+    {0x0.0010,"icon",function() return chr(mpeek()) end},
+    {0x0.0020,"slot",mpeek},
+    {0x0.0040,"ammouse"},
+    {0x0.0080,"speed"},
+    {0x0.0100,"damage"},
+    {0x0.0200,"ammotype",unpack_actor_ref},
+    {0x0.0800,"mass"},
+    -- some actor have multiple sounds (weapon for ex.)
+    {0x0.1000,"pickupsound"},
+    {0x0.2000,"attacksound"},
+    {0x0.4000,"hudcolor"},
+    {0x0.8000,"deathsound"},
+    {0x1,"meleerange"},
+    {0x2,"maxtargetrange"},
+    {0x4,"ammogive"}
+  }
+
+  -- actors functions
+  local function_factory={
+    -- A_FireBullets
+    function()
+      local xspread,yspread,bullets,dmg,puff=unpack_fixed(),unpack_fixed(),mpeek(),mpeek(),unpack_actor_ref()
+      return function(owner)
+        -- find 'real' owner
+        owner=owner.owner or owner
+        for i=1,bullets do
+          local angle=owner.angle+(rnd(2*xspread)-xspread)/360
+          hitscan_attack(owner,angle,1024,dmg,puff)
+        end
+      end
+    end,
+    -- A_PlaySound
+    function()
+      local s=mpeek()
+      return function()
+        sfx(s)
+      end
+    end,
+    -- A_FireProjectile
+    function()
+      local projectile=unpack_actor_ref()
+      return function(owner)
+        -- find 'real' owner
+        owner=owner.owner or owner
+        -- fire at 1/2 edge of owner radius (ensure collision when close to walls)
+        local angle,speed,radius=owner.angle,projectile.speed,owner.actor.radius/2
+        local ca,sa=cos(angle),-sin(angle)
+        local thing=with_physic(make_thing(projectile,owner[1]+radius*ca,owner[2]+radius*sa,0,angle))
+        thing.owner=owner
+        -- todo: get height from properties
+        -- todo: improve z setting
+        thing[3]=owner[3]+32
+        thing:apply_forces(speed*ca,speed*sa)         
+        add_thing(thing)
+      end
+    end,
+    -- A_WeaponReady
+    function(item)
+      return function(weapon)
+        if not wp_hud and btn(❎) then
+          local inventory,ammotype,newqty=weapon.owner.inventory,item.ammotype,0
+          -- handle "fist" (eg weapon without ammotype)
+          if(ammotype) newqty=inventory[item.ammotype]-item.ammouse
+          if newqty>=0 then
+            if(ammotype) inventory[item.ammotype]=newqty
+            -- play attack sound
+            if(item.attacksound) sfx(item.attacksound)
+            -- fire state
+            weapon:jump_to(9)
+          end
+        end
+      end
+    end,
+    -- A_Explode
+    function()
+      local dmg,maxrange=unpack_variant(),unpack_variant()
+      return function(thing)
+        -- todo: optimize lookup!!!
+        for _,otherthing in pairs(_things) do
+          if otherthing!=thing and otherthing.hit then
+            local n,d=line_of_sight(thing,otherthing,maxrange)
+            if(d) otherthing:hit(dmg*(1-d/maxrange),n)
+          end
+        end
+      end
+    end,
+    -- A_FaceTarget
+    function()
+      local speed=mpeek()/255
+      return function(thing)
+        -- nothing to face to?
+        local otherthing=thing.target
+        if(not otherthing) return
+        local target_angle=atan2(-thing[1]+otherthing[1],thing[2]-otherthing[2])
+        thing.angle=lerp(shortest_angle(target_angle,thing.angle),target_angle,speed)
+      end
+    end,
+    -- A_Look
+    function()
+      return function(self)
+        for ptgt in all({self.target,_plyr}) do
+          if(ptgt and not ptgt.dead) otherthing=ptgt break
+        end
+        -- nothing to do?
+        if(not otherthing) self.target=nil return
+        -- in range/visible?
+        local n,d=line_of_sight(self,otherthing,1024)
+        if d then
+          self.target=otherthing
+          -- see
+          self:jump_to(2)
+        end 
+      end
+    end,
+    -- A_Chase
+    function(item)
+      local speed,range,maxrange=item.speed,item.meleerange or 64,item.maxtargetrange or 1024 
+      return function(self)
+        -- still active target?
+        local otherthing=self.target
+        if otherthing and not otherthing.dead then
+          -- in range/visible?
+          local n,d=line_of_sight(self,otherthing,maxrange)
+          if d and rnd()<0.4 then
+            if d<range then
+              -- close range attack (if any)
+              self:jump_to(3,4)
+            else
+              -- ranged attack
+              self:jump_to(4)
+            end
+          else
+            -- zigzag toward target
+            local nx,ny,dir=n[1]*0.5,n[2]*0.5,rnd{1,-1}
+            local mx,my=ny*dir+nx,nx*-dir+ny
+            local target_angle=atan2(mx,-my)
+            self.angle=lerp(shortest_angle(target_angle,self.angle),target_angle,0.5)
+            self:apply_forces(speed*mx,speed*my)
+          end
+          return
+        end
+        -- lost/dead?
+        self.target=nil
+        -- idle state
+        self:jump_to(0)
+      end
+    end,
+    -- A_Light
+    function()
+      local light=mpeek()/255
+      return function()
+        _ambientlight=light
+      end
+    end,
+    -- A_MeleeAttack
+    function()
+      local dmg,puff=mpeek(),unpack_actor_ref()
+      return function(owner)
+        -- find 'real' owner
+        owner=owner.owner or owner
+        hitscan_attack(owner,owner.angle,owner.meleerange or 64,dmg,puff)
+      end
+    end      
+  }
+
+  -- copy "coll" and attach to a property "name" on thing
+  local function attach_array(coll,thing,name)
+    if coll then
+      thing[name]={}
+      for k,v in pairs(coll) do
+        thing[name][k]=v
+      end  
+    end
   end
 
   unpack_array(function()
@@ -1566,66 +1764,37 @@ function unpack_actors()
           end
         },{__index=thing})
 
-        local function clone(coll,name)
-          if coll then
-            thing[name]={}
-            for k,v in pairs(coll) do
-              thing[name][k]=v
-            end  
-          end
-        end
-
         -- clone startup inventory
-        clone(inventory,"inventory")
+        attach_array(inventory,thing,"inventory")
         -- clone weapons (to avoid changing actor definition)
-        clone(weapons,"weapons")
+        attach_array(weapons,thing,"weapons")
 
         return thing
       end
     }
 
-    -- actor properties + skill ammo factor
-    local properties,properties_factory=unpack_fixed(),{
-      {0x0.0001,"health"},
-      {0x0.0002,"armor"},
-      {0x0.0004,"amount"},
-      {0x0.0008,"maxamount"},
-      -- convert icon code into character
-      {0x0.0010,"icon",function() return chr(mpeek()) end},
-      {0x0.0020,"slot",mpeek},
-      {0x0.0040,"ammouse"},
-      {0x0.0080,"speed"},
-      {0x0.0100,"damage"},
-      {0x0.0200,"ammotype",unpack_actor_ref},
-      {0x0.0800,"mass"},
-      -- some actor have multiple sounds (weapon for ex.)
-      {0x0.1000,"pickupsound"},
-      {0x0.2000,"attacksound"},
-      {0x0.4000,"hudcolor"},
-      {0x0.8000,"deathsound"},
-      {0x1,"meleerange"},
-      {0x2,"maxtargetrange"},
-      {0x0.0400,"",function()
-        -- 
-        unpack_array(function()
-          local startitem,amount=unpack_actor_ref(),unpack_variant()
-          if startitem.kind==2 then
-            -- weapon
-            weapons=weapons or {}
-            -- create a new "dummy" thing
-            local weapon_thing=startitem:attach({})
-            weapons[startitem.slot]=weapon_thing
-            -- force 'ready' state
-            weapon_thing:jump_to(7)
-            -- set initial weapon selection
-            if(not active_slot) active_slot=startitem.slot
-          else
-            inventory=inventory or {}
-            inventory[startitem]=amount
-          end
-        end)
-      end}
-    }
+    local properties=unpack_fixed()
+    -- warning: update if adding new properties
+    properties_factory[19]={0x0.0400,"",function()
+      unpack_array(function()
+        local startitem,amount=unpack_actor_ref(),unpack_variant()
+        if startitem.kind==2 then
+          -- weapon
+          weapons=weapons or {}
+          -- create a new "dummy" thing
+          local weapon_thing=startitem:attach({})
+          weapons[startitem.slot]=weapon_thing
+          -- force 'ready' state
+          weapon_thing:jump_to(7)
+          -- set initial weapon selection
+          if(not active_slot) active_slot=startitem.slot
+        else
+          inventory=inventory or {}
+          inventory[startitem]=amount
+        end
+      end)
+    end}
+
     -- decode 
     for _,props in ipairs(properties_factory) do
       local mask,k,fn=unpack(props)
@@ -1640,192 +1809,41 @@ function unpack_actors()
       if(item.pickupsound) sfx(item.pickupsound)
     end
     
-    if kind==0 then
+    local pickup_factory={
       -- default inventory item (ex: lock)
-      item.pickup=function(thing,target)
+      [0]=function(_,target)
         pickup(target.inventory)
-      end
-    elseif kind==1 then
+      end,
       -- ammo family
-      local ammotype=unpack_actor_ref()
-      item.pickup=function(thing,target)
-        pickup(target.inventory,ammotype,_ammo_factor*item.amount)
-      end
-    elseif kind==2 then
+      function(_,target)
+        pickup(target.inventory,item.ammotype,_ammo_factor*item.amount)
+      end,
       -- weapon
-      local ammogive,ammotype=unpack_variant(),item.ammotype
-      item.pickup=function(thing,target)
-        pickup(target.inventory,ammotype,_ammo_factor*ammogive,ammotype.maxamount)
+      function(thing,target)
+        local ammotype=item.ammotype
+        pickup(target.inventory,ammotype,_ammo_factor*item.ammogive,ammotype.maxamount)
 
         target:attach_weapon(thing)
         -- remove from things
         del_thing(thing)
-      end
-    elseif kind==3 then
+      end,
       -- health pickup
-      item.pickup=function(thing,target)
+      function(_,target)
         pickup(target,"health")
-      end
-    elseif kind==4 then
+      end,
       -- armor pickup
-      item.pickup=function(thing,target)
+      function(_,target)
         pickup(target,"armor")
       end
-    end
-
+    }
+    item.pickup=pickup_factory[kind]
+    
     -- actor states
     unpack_array(function()
       -- map label id to state command line number
       state_labels[mpeek()]=mpeek()
     end)
-    
-    -- actors functions
-    local function_factory={
-      -- A_FireBullets
-      function()
-        local xspread,yspread,bullets,dmg,puff=unpack_fixed(),unpack_fixed(),mpeek(),mpeek(),unpack_actor_ref()
-        return function(owner)
-          -- find 'real' owner
-          owner=owner.owner or owner
-          for i=1,bullets do
-            local angle=owner.angle+(rnd(2*xspread)-xspread)/360
-            hitscan_attack(owner,angle,1024,dmg,puff)
-          end
-        end
-      end,
-      -- A_PlaySound
-      function()
-        local s=mpeek()
-        return function()
-          sfx(s)
-        end
-      end,
-      -- A_FireProjectile
-      function()
-        local projectile=unpack_actor_ref()
-        return function(owner)
-          -- find 'real' owner
-          owner=owner.owner or owner
-          -- fire at 1/2 edge of owner radius (ensure collision when close to walls)
-          local angle,speed,radius=owner.angle,projectile.speed,owner.actor.radius/2
-          local ca,sa=cos(angle),-sin(angle)
-          local thing=with_physic(make_thing(projectile,owner[1]+radius*ca,owner[2]+radius*sa,0,angle))
-          thing.owner=owner
-          -- todo: get height from properties
-          -- todo: improve z setting
-          thing[3]=owner[3]+32
-          thing:apply_forces(speed*ca,speed*sa)         
-          add_thing(thing)
-        end
-      end,
-      -- A_WeaponReady
-      function()
-        return function(weapon)
-          if not wp_hud and btn(❎) then
-            local inventory,ammotype,newqty=weapon.owner.inventory,item.ammotype,0
-            -- handle "fist" (eg weapon without ammotype)
-            if(ammotype) newqty=inventory[item.ammotype]-item.ammouse
-            if newqty>=0 then
-              if(ammotype) inventory[item.ammotype]=newqty
-              -- play attack sound
-              if(item.attacksound) sfx(item.attacksound)
-              -- fire state
-              weapon:jump_to(9)
-            end
-          end
-        end
-      end,
-      -- A_Explode
-      function()
-        local dmg,maxrange=unpack_variant(),unpack_variant()
-        return function(thing)
-          -- todo: optimize lookup!!!
-          for _,otherthing in pairs(_things) do
-            if otherthing!=thing and otherthing.hit then
-              local n,d=line_of_sight(thing,otherthing,maxrange)
-              if(d) otherthing:hit(dmg*(1-d/maxrange),n)
-            end
-          end
-        end
-      end,
-      -- A_FaceTarget
-      function()
-        local speed=mpeek()/255
-        return function(thing)
-          -- nothing to face to?
-          local otherthing=thing.target
-          if(not otherthing) return
-          local target_angle=atan2(-thing[1]+otherthing[1],thing[2]-otherthing[2])
-          thing.angle=lerp(shortest_angle(target_angle,thing.angle),target_angle,speed)
-        end
-      end,
-      -- A_Look
-      function()
-        return function(self)
-          for ptgt in all({self.target,_plyr}) do
-            if(ptgt and not ptgt.dead) otherthing=ptgt break
-          end
-          -- nothing to do?
-          if(not otherthing) self.target=nil return
-          -- in range/visible?
-          local n,d=line_of_sight(self,otherthing,1024)
-          if d then
-            self.target=otherthing
-            -- see
-            self:jump_to(2)
-          end 
-        end
-      end,
-      -- A_Chase
-      function()
-        local speed,range,maxrange=item.speed,item.meleerange or 64,item.maxtargetrange or 1024 
-        return function(self)
-          -- still active target?
-          local otherthing=self.target
-          if otherthing and not otherthing.dead then
-            -- in range/visible?
-            local n,d=line_of_sight(self,otherthing,maxrange)
-            if d and rnd()<0.4 then
-              if d<range then
-                -- close range attack (if any)
-                self:jump_to(3,4)
-              else
-                -- ranged attack
-                self:jump_to(4)
-              end
-            else
-              -- zigzag toward target
-              local nx,ny,dir=n[1]*0.5,n[2]*0.5,rnd{1,-1}
-              local mx,my=ny*dir+nx,nx*-dir+ny
-              local target_angle=atan2(mx,-my)
-              self.angle=lerp(shortest_angle(target_angle,self.angle),target_angle,0.5)
-              self:apply_forces(speed*mx,speed*my)
-            end
-            return
-          end
-          -- lost/dead?
-          self.target=nil
-          -- idle state
-          self:jump_to(0)
-        end
-      end,
-      -- A_Light
-      function()
-        local light=mpeek()/255
-        return function()
-          _ambientlight=light
-        end
-      end,
-      -- A_MeleeAttack
-      function()
-        local dmg,puff=mpeek(),unpack_actor_ref()
-        return function(owner)
-          -- find 'real' owner
-          owner=owner.owner or owner
-          hitscan_attack(owner,owner.angle,owner.meleerange or 64,dmg,puff)
-        end
-      end      
-    }
+        
     -- states & sprites
     unpack_array(function()
       local flags=mpeek()
@@ -1853,7 +1871,7 @@ function unpack_actors()
         end)
         -- function?
         if flags&0x8>0 then
-          cmd.fn=function_factory[mpeek()]()
+          cmd.fn=function_factory[mpeek()](item)
         end
       end
       add(states,cmd)
@@ -1868,18 +1886,17 @@ end
 -- unpack level data (geometry + things)
 function unpack_map(skill,actors)
   -- sectors
-  local sectors,sides,verts,lines,sub_sectors,all_segs,nodes={},{},{},{},{},{},{}
-  unpack_array(function(i)
+  local sectors,sub_sectors,nodes={},{},{}
+  unpack_array(function()
     local special=mpeek()
     local sector=add(sectors,{
-      id=i,
       -- sector attributes
       special=special,
       -- ceiling/floor height
       ceil=unpack_int(2),
       floor=unpack_int(2),
-      ceiltex=unpack_texture(),
-      floortex=unpack_texture(),
+      ceiltex=unpack_fixed(),
+      floortex=unpack_fixed(),
       -- rebase to 0-1
       lightlevel=mpeek()/255,
       -- number of things in sector
@@ -1906,135 +1923,138 @@ function unpack_map(skill,actors)
     end
   end)
 
-  -- sidedefs
-  unpack_array(function()
-    add(sides,{
-      sector=sectors[unpack_variant()],
-      toptex=unpack_texture(),
-      midtex=unpack_texture(),
-      bottomtex=unpack_texture()
-    })
-  end)
-
-  -- vertices
-  unpack_array(function()
-    add(verts,{unpack_fixed(),unpack_fixed()})
-  end)
-  
   -- linedefs
-  unpack_array(function()
-    local line={
-      -- sides
-      [true]=sides[unpack_variant()],
-      [false]=sides[unpack_variant()],
-      flags=mpeek()}      
-    -- special actions
-    if line.flags&0x2>0 then
-      local function switch_texture()
-        line[true].midtex=_onoff_textures[line[true].midtex]
-      end             
-      line.trigger=unpack_special(
-        mpeek(),
-        -- helper function - handles lock & repeat
-        function(fn,actorlock)
-          return function(thing)
-            -- need lock?
-            if actorlock then
-              -- keep key in inventory (for reusable locked doors)
-              if not thing.inventory[actorlock] then 
-                _msg="need key"
-                -- play "err" sound
-                sfx(62)
-                return
-              end
-            end
-
-            -- backup trigger
-            local trigger=line.trigger
-            -- avoid reentrancy
-            line.trigger=nil
-            --
-            switch_texture()
-            -- do the action *outside* of a coroutine
-            fn()
-            -- repeatable?
-            if line.flags&32>0 then
-              do_async(function()
-                -- avoid player hitting trigger/button right away
-                wait_async(30)
-                -- unlock (if repeatable)
-                line.trigger=trigger 
-                -- restore visual
-                switch_texture()
-              end)
-            end
-          end
-        end,
-        sectors,
-        actors)
-    end
-    add(lines,line)
-  end)
-
-  -- convex sub-sectors
-  unpack_array(function(i)
-    -- register current sub-sector in pvs
-    local segs={id=i,pvs={},things={}}
-    unpack_array(function()
-      local s=add(segs,{
-        -- 1: vertex
-        verts[unpack_variant()],
-      })
-      local flags=mpeek()
-      s.side=flags&0x1==0
-      -- optional links
-      if(flags&0x2>0) s.line=lines[unpack_variant()]
-      if(flags&0x4>0) s.partner=unpack_variant()
-      
-      -- direct link to sector (if not already set)
-      if s.line and not segs.sector then
-        segs.sector=s.line[s.side].sector
-      end
-      --assert(s.v0,"invalid seg")
-      --assert(segs.sector,"missing sector")
-      add(all_segs,s)
-    end)
-    -- pvs (packed as a bit array)
-    unpack_array(function()
-      local id=unpack_variant()
-      local mask=segs.pvs[id\32] or 0
-      segs.pvs[id\32]=mask|0x0.0001<<(id&31)
-    end)
-    -- normals
-    local s0=segs[#segs]
-    local v0=s0[1]
-    for i,s1 in ipairs(segs) do
-      local v1=s1[1]
-      local n,len=v2_normal(v2_make(v0,v1))
-      -- 2: segment dir
-      add(s0,n)
-      -- 3: dist to origin
-      add(s0,v2_dot(n,v0))
-      -- 4: len
-      add(s0,len)
-      -- normal
-      n={-n[2],n[1]}
-      -- 5: normal
-      add(s0,n)
-      -- 6: distance to origin
-      add(s0,v2_dot(n,v0))
-      -- 7: use normal direction to select uv direction
-      add(s0,abs(n[1])>abs(n[2]) and "v" or "u")
-
-      v0,s0=v1,s1
-    end
-    add(sub_sectors,segs)
-  end)
-
-  -- fix seg -> sub-sector link (e.g. portals)
-  for _,seg in pairs(all_segs) do
-    seg.partner=sub_sectors[seg.partner]
+  local function switch_texture(line)
+    -- flip midtex only
+    line[true][3]=_onoff_textures[line[true][3]]
   end
+  do
+    local sides,verts,lines,all_segs={},{},{},{}
+    -- sidedefs
+    unpack_array(function()
+      add(sides,{
+        -- 1: sector reference
+        sectors[unpack_variant()],
+        -- bottomtex
+        unpack_fixed(),
+        -- midtex
+        unpack_fixed(),
+        -- toptex
+        unpack_fixed()
+      })
+    end)
+
+    -- vertices
+    unpack_array(function()
+      add(verts,{unpack_fixed(),unpack_fixed()})
+    end)
+
+    unpack_array(function()
+      local line=add(lines,{
+        -- sides
+        [true]=sides[unpack_variant()],
+        [false]=sides[unpack_variant()],
+        flags=mpeek()}) 
+      -- special actions
+      if line.flags&0x2>0 then
+        local special,actorlock=unpack_special(sectors,actors)             
+        line.trigger=function(thing)
+          -- need lock?
+          -- note: keep key in inventory (for reusable locked doors)
+          if actorlock and not thing.inventory[actorlock] then 
+            _msg="need key"
+            -- play "err" sound
+            sfx(62)
+            return
+          end
+
+          -- backup trigger
+          local trigger=line.trigger
+          -- avoid reentrancy
+          line.trigger=nil
+          --
+          switch_texture(line)
+          -- do the action *outside* of a coroutine
+          special()
+          -- repeatable?
+          if line.flags&32>0 then
+            do_async(function()
+              -- avoid player hitting trigger/button right away
+              wait_async(30)
+              -- unlock (if repeatable)
+              line.trigger=trigger 
+              -- restore visual
+              switch_texture(line)
+            end)
+          end
+        end
+      end
+    end)
+
+    -- convex sub-sectors
+    unpack_array(function(i)
+      -- register current sub-sector in pvs
+      local segs={id=i,pvs={}}
+      unpack_array(function()
+        local v,flags=verts[unpack_variant()],mpeek()
+        local s=add(segs,{
+          -- 1: vertex
+          v,
+          side=flags&0x1==0,
+          -- optional links
+          line=flags&0x2>0 and lines[unpack_variant()],
+          partner=flags&0x4>0 and unpack_variant()
+        })
+
+        -- direct link to sector (if not already set)
+        if s.line and not segs.sector then
+          segs.sector=s.line[s.side][1]
+        end
+        --assert(s.v0,"invalid seg")
+        --assert(segs.sector,"missing sector")
+        add(all_segs,s)
+      end)
+      -- pvs (packed as a bit array)
+      unpack_array(function()
+        local id=unpack_variant()
+        local mask=segs.pvs[id\32] or 0
+        segs.pvs[id\32]=mask|0x0.0001<<(id&31)
+      end)
+      -- normals
+      local s0=segs[#segs]
+      local v0=s0[1]
+      for i,s1 in ipairs(segs) do
+        local v1=s1[1]
+        local n,len=v2_normal(v2_make(v0,v1))
+        local nx,ny=unpack(n)
+        -- 2: segment dir x
+        add(s0,nx)
+        -- 3: segment dir y
+        add(s0,ny)
+        -- 4: dist to origin
+        add(s0,v2_dot(n,v0))
+        -- 5: len
+        add(s0,len)
+        -- 6: normal x
+        add(s0,-ny)
+        -- 7: normal y
+        add(s0,nx)
+        -- 8: distance to origin
+        add(s0,v2_dot({-ny,nx},v0))
+        -- 9: use normal direction to select uv direction
+        add(s0,abs(ny)>abs(nx) and "v" or "u")
+
+        v0,s0=v1,s1
+      end
+      add(sub_sectors,segs)
+    end)
+
+    -- fix seg -> sub-sector link (e.g. portals)
+    for _,seg in pairs(all_segs) do
+      seg.partner=sub_sectors[seg.partner]
+    end
+  end
+
   -- bsp nodes
   unpack_array(function()
     local node=add(nodes,{
@@ -2043,22 +2063,7 @@ function unpack_map(skill,actors)
       -- distance to plane
       unpack_fixed(),
       bbox={},
-      leaf={},
-      -- traverse and renders bsp in back to front order
-      -- calls 'visit' function
-      visit=function(self,pos,visitor)
-        local side=self[1]*pos[1]+self[2]*pos[2]<=self[3]
-        visitor(self,side,pos,visitor)
-        visitor(self,not side,pos,visitor)
-      end,
-      find_sub_sector=function(self,pos)
-        local side=v2_dot(self,pos)<=self[3]
-        if self.leaf[side] then
-          -- leaf?
-          return self[side]
-        end    
-        return self[side]:find_sub_sector(pos)
-      end
+      leaf={}
     })
     local flags=mpeek()
     local function unpack_node(side,leaf)
@@ -2104,21 +2109,16 @@ function unpack_map(skill,actors)
   unpack_array(function()
     local thing=unpack_thing()
     if thing then
-      add(thing,unpack_special(
-        mpeek(),
-        function(fn)
-          return function(self)
-            -- avoid reentrancy
-            self.trigger=nil
-            --
-            fn()
-          end
-        end,
-        sectors,
-        actors))        
+      local special=unpack_special(sectors,actors) 
+      add(thing,function(self)
+          -- avoid reentrancy
+          self.trigger=nil
+          --
+          special()
+        end)
     end
   end)    
 
-  -- restore main cart
+  -- returns top level bsp node + things to be created
   return nodes[#nodes],things
 end

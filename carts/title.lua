@@ -46,7 +46,7 @@ function _update60()
     if load_ttl==0 then
       -- load game "group" cart
       local sel=menus[1].sel
-      load(mod_name.."_".._maps_group[sel]..".p8",nil,menus[2].sel..",".._maps_id[sel])
+      load(mod_name.."_".._maps_group[sel]..".p8",nil,menus[2].sel..","..sel)
     end
   else
     if menu_i>0 then
