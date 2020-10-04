@@ -14,6 +14,10 @@ menus,menu_i={
 },sel=2}},0
 
 function _init()
+  cartdata(mod_name)
+  -- reset saved state
+  dset(0,-1)
+  
 	cls()
 	endstate,anm_ttl=peek(0x4300),0
 	if (endstate>0) then
