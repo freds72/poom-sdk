@@ -640,22 +640,16 @@ function intersect_sub_sector(segs,p,d,tmin,tmax,radius,res,skipthings)
       local d=v2_dot({s0[2],s0[3]},pt)-s0[4]
       -- extended segment
       if d>=-radius and d<s0[5]+radius then
-        -- moving away
-        if denom<0 then
-          if(t>tmin) tmin=t
-          --if(tmin>tmax) return
-        else -- moving in
-          local dist_b=s0[8]-v2_dot(n,{px+_tmax*dx,py+_tmax*dy})
-          if s0.line and (dist_a<radius or dist_b<radius) then
-            add(res,{ti=t,t=mid((dist_a-1/32)/(dist_a-dist_b),0,1),seg=s0,n=n})
-          end
-          -- exact segment
-          if d>=0 and d<s0[5] then
-            if(t<tmax) tmax=t othersector=s0.partner
-            ---if(tmax<tmin) return 
-          end
+        local dist_b,inseg=s0[8]-v2_dot(n,{px+_tmax*dx,py+_tmax*dy}),d>=0 and d<s0[5]
+        -- exact segment?
+        if inseg then
+          if(t<tmax) tmax=t othersector=s0.partner
+          -- if(tmax<tmin) return 
         end
-      end 
+        if s0.line and (dist_a<radius or dist_b<radius) then
+          add(res,{ti=t,t=mid(dist_a/(dist_a-dist_b),0,1),dist=dist_a<radius and inseg and (radius-dist_a),seg=s0,n=n})
+        end
+      end
     end
   end
 
@@ -680,7 +674,7 @@ function hitscan_attack(owner,angle,range,dmg,puff)
 
     if fix_move then
       -- actual hit position
-      local pos={owner[1],owner[2],h}
+      local pos={owner[1],owner[2]}
       v2_add(pos,move_dir,fix_move.ti)
       local puffthing=make_thing(puff,pos[1],pos[2],0,angle)
       -- todo: get height from properties
@@ -834,7 +828,7 @@ function with_physic(thing)
           if fix_move then
             if is_missile then
               -- fix position & velocity
-              v2_add(self,move_dir,fix_move.t)
+              v2_add(self,move_dir,fix_move.ti)
               velocity={0,0,0}
               -- explosion sound (if any)
               if(actor.deathsound) sfx(actor.deathsound)
@@ -851,6 +845,10 @@ function with_physic(thing)
               if fix<0 then
                 -- apply impulse (e.g. fix velocity)
                 v2_add(velocity,n,fix)
+              end
+              -- too close to wall?
+              if fix_move.dist then
+                v2_add(self,n,-fix_move.dist)
               end
             end
           end
@@ -885,8 +883,6 @@ function with_physic(thing)
               -- use special?
               if btnp(🅾️) then
                 ldef.trigger(self)
-              else
-                _msg="press 🅾️ to activate"
               end
               -- trigger/message only closest hit
               break
@@ -1338,7 +1334,6 @@ function _update()
   _futures=tmp
 
   -- keep world running
-  _msg=nil
   for _,thing in pairs(_things) do
     if(thing.control) thing:control()
     thing:tick()
@@ -1926,11 +1921,11 @@ function unpack_map(skill,actors)
     })
     -- sector behaviors (if any)
     if special==65 then
-      local lights={sector.lightlevel,0}
+      local lights={sector.lightlevel,0.125}
       do_async(function()
         while true do
           sector.lightlevel=rnd(lights)
-          wait_async(rnd(15))
+          wait_async(5)
         end
       end)
     elseif special==84 then
@@ -1979,9 +1974,16 @@ function unpack_map(skill,actors)
           -- need lock?
           -- note: keep key in inventory (for reusable locked doors)
           if actorlock and not thing.inventory[actorlock] then 
-            _msg="need key"
-            -- play "err" sound
-            sfx(62)
+            -- avoid too much messages/reentrancy
+            if not line.locked then
+              line.locked=do_async(function()
+                _msg="locked"
+                wait_async(15)
+                _msg,line.locked=nil
+              end)
+              -- play "err" sound
+              sfx(62)
+            end
             return
           end
 
