@@ -196,9 +196,15 @@ The following sector "special" behaviors are supported:
 The following triggers are supported:
 | ID | Type | Description |
 |----|:----:|:----------:|
-| 202 | Generic Door | Lower/raise sector ceiling. See: [Generic Door](https://zdoom.org/wiki/Generic_Door) |
+| 10 | Door Close | Lowers the ceiling of all affected sectors to the floor. See: [Door_Close](https://zdoom.org/wiki/Door_Close) |
+| 11 | Door Open | Raises the ceiling of all affected sectors to four units below the lowest surrounding ceiling. See: [Door_Open](https://zdoom.org/wiki/Door_Open) |
+| 12 | Door Raise | Raises the ceiling of all affected sectors to four units below the lowest surrounding ceiling. After the door is opened, it will be closed again after delay tics. See: [Door_Raise](https://zdoom.org/wiki/Door_Raise) |
+| 13 | Door Close | Raises the ceiling of all affected sectors to four units below the lowest surrounding ceiling if the player has the proper key. After the door is opened, it will be closed again after delay tics. See: [Door_LockedRaise](https://zdoom.org/wiki/Door_LockedRaise) |
+| 62 | Platform Down/Stay/Up | Lowers a platform, waits, and then raises it back to its original position. See: [Plat_DownWaitUpStay](https://zdoom.org/wiki/Plat_DownWaitUpStay) |
 | 64 | Platform Up/Down/Stay | Lower/raise sector floor. See: [Platform Up/Down/Stay](https://zdoom.org/wiki/Plat_UpWaitDownStay) |
 | 112 | Light Change | Set sector light. See: [Light Change To Value](https://zdoom.org/wiki/Light_ChangeToValue)
+
+> lighttag property is not supported
 
 ### Animated Triggers
 
