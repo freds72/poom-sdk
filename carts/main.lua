@@ -1077,7 +1077,7 @@ function attach_plyr(thing,actor,skill)
       -- keys
       for item,amount in pairs(self.inventory) do
         if amount>0 and item.slot then
-          printb(item.icon,106,120-item.slot*10,item.hudcolor)
+          printb(item.icon,98+item.slot*8,111,item.hudcolor)
         end
       end
 
@@ -1214,7 +1214,7 @@ function play_state()
   _cam=make_camera()
 
   -- start level music (if any)
-  music(_maps_music[map_id],0,14)
+  music(_maps_music[_map_id],0,14)
 
   return 
     -- update
