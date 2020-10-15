@@ -12,6 +12,8 @@ local _ambientlight,_ammo_factor,_intersectid,_msg=0,1,0
 
 -- copy color gradients (16*16 colors x 2) to memory
 memcpy(0x4300,0x1000,512)
+-- immediately install palette (for loading screen)
+memcpy(0x5f10,0x4400,16)
 
 -- single-linked list keyed on first element
 local depth_cls={
@@ -64,7 +66,10 @@ function make_camera()
 end
 
 function lerp(a,b,t)
-  return a*(1-t)+b*t
+  -- todo: try a+t*(b-a)
+  -- faster by 1 cycle
+  -- return a*(1-t)+b*t
+  return a+t*(b-a)
 end
 
 -- return shortest angle to target
@@ -189,7 +194,7 @@ function make_sprite_cache(tiles)
 				if len>31 then
 					local old=remove(first)
 					-- reuse cache entry
-					sx,sy,index[old.id]=old[1],old[2]
+					sx,sy,index[old.id]=old.sx,old.sy
 				end
 				-- new (or relocate)
 				-- copy data to sprite sheet
@@ -198,7 +203,7 @@ function make_sprite_cache(tiles)
 					poke4(mem|(j&1)<<2|(j\2)<<6,tiles[id+j])
 				end		
 				--
-				entry={sx,sy,id=id}
+				entry={sx=sx,sy=sy,id=id}
 				-- reverse lookup
 				index[id]=entry
 			end
@@ -219,7 +224,7 @@ function make_sprite_cache(tiles)
 			end
 			len+=1
 			-- return sprite sheet coords
-			return entry[1],entry[2]
+			return entry.sx,entry.sy
 		end
 	}
 end
@@ -309,10 +314,6 @@ function draw_walls(segs,v_cache,light)
     -- logical split or wall?
     -- front facing?
     if x0<x1 and ldef then
-      -- span rasterization
-      -- pick correct texture "major"
-      local dx,u0=x1-x0,v0[seg[9]]*w0
-
       -- dual?
       local facingside,otherside,otop,obottom=ldef[seg.side],ldef[not seg.side]
       -- peg bottom?
@@ -341,7 +342,9 @@ function draw_walls(segs,v_cache,light)
           otop=toptex!=0 and otop
           obottom=bottomtex!=0 and obottom
         end
-
+        -- span rasterization
+        -- pick correct texture "major"
+        local dx,u0=x1-x0,v0[seg[9]]*w0
         local cx0,dy,du,dw=x0\1+1,(y1-y0)/dx,(v1[seg[9]]*w1-u0)/dx,((w1-w0)<<4)/dx
         w0<<=4
         local sx=cx0-x0    
@@ -354,7 +357,7 @@ function draw_walls(segs,v_cache,light)
         for x=cx0,x1\1 do
           if w0>2.4 then
             -- top/bottom+color shifing
-            local t,b,pal1=y0-top*w0,y0-bottom*w0,(light*min(15,w0<<1))\1
+            local t,b,u,pal1=y0-top*w0,y0-bottom*w0,u0/(w0>>4),(light*min(15,w0<<1))\1
             if(pal0!=pal1) memcpy(0x5f00,0x4300|pal1<<4,16) pal0=pal1
 
             -- top wall side between current sector and back sector
@@ -363,7 +366,7 @@ function draw_walls(segs,v_cache,light)
             if otop then
               poke4(0x5f38,toptex)             
               local ot=y0-otop*w0
-              tline(x,ct,x,ot,u0/w0,(ct-t)/w0+yoffset,0,1/w0)
+              tline(x,ct,x,ot,u,(ct-t)/w0+yoffset,0,1/w0)
               -- new window top
               t=ot
               ct=ot\1+1
@@ -373,7 +376,7 @@ function draw_walls(segs,v_cache,light)
               poke4(0x5f38,bottomtex)             
               local ob=y0-obottom*w0
               local cob=ob\1+1
-              tline(x,cob,x,b,u0/w0,(cob-ob)/w0,0,1/w0)
+              tline(x,cob,x,b,u,(cob-ob)/w0,0,1/w0)
               -- new window bottom
               b=ob
             end
@@ -382,7 +385,7 @@ function draw_walls(segs,v_cache,light)
             if midtex!=0 then
               -- texture selection
               poke4(0x5f38,midtex)
-              tline(x,ct,x,b,u0/w0,(ct-t)/w0+yoffset,0,1/w0)
+              tline(x,ct,x,b,u,(ct-t)/w0+yoffset,0,1/w0)
             end   
           end
           y0+=dy
@@ -419,7 +422,8 @@ function draw_flats(v_cache,segs,things)
       if(ax<<1>az) code|=8
       
       local w=128/az
-      v={ax,m8,az,outcode=code,u=x,v=z,x=63.5+ax*w,y=63.5-m8*w,w=w}
+      -- >>4 to fix u|v*w overflow on large maps 
+      v={ax,m8,az,outcode=code,u=x>>4,v=z>>4,x=63.5+ax*w,y=63.5-m8*w,w=w}
       v_cache[v0]=v
     end
     v.seg=seg
@@ -1236,7 +1240,7 @@ function play_state()
 end
 
 function gameover_state(pos,angle,target,h)
-  local idle_ttl,target_angle=90,angle
+  local idle_ttl,target_angle=30,angle
   return
     -- update
     function()
@@ -1253,10 +1257,11 @@ function gameover_state(pos,angle,target,h)
       -- avoid immediate button hit
       if idle_ttl<0 then
         if btnp(🅾️) then
-          -- back to title cart        
-          load(mod_name.."_0.p8",nil,"gameover")
+          -- 1: gameover    
+          load(mod_name.."_0.p8",nil,_skill..",".._map_id..",1")
         elseif btnp(❎) then
-          next_state(slicefade_state,play_state)
+          -- 3: retry
+          load(mod_name.."_0.p8",nil,_skill..",".._map_id..",3")
         end
       end
     end,
@@ -1272,45 +1277,20 @@ function gameover_state(pos,angle,target,h)
     end
 end
 
-function slicefade_state(...)
-  local args,ttl,r,h,rr=pack(...),30,{},{},0
-  for i=0,127 do
-    rr=lerp(rr,rnd(0.1),0.3)
-    r[i],h[i]=0.1+rr,0
-  end
-  return 
-    -- update
-    function()
-      ttl-=1
-      if ttl<0 or btnp(4) or btnp(5) then
-        next_state(unpack(args))
-      end
-    end,
-    -- draw
-    function()
-      cls()
-      for i,r in pairs(r) do
-        h[i]=lerp(h[i],129,r)
-        sspr(i,0,1,128,i,h[i],1,128)
-      end
-    end,
-    -- init
-    function()
-      -- copy screen to spritesheet
-      memcpy(0x0,0x6000,8192)
-    end
-end
 
 -->8
 -- game loop
 function _init()
   cartdata(mod_name)
 
+  -- exit menu entry
+  menuitem(1,"main menu",function()
+    load(mod_name.."_0.p8")
+  end)
+  
   -- launch params
   local p=split(stat(6))
   _skill,_map_id=tonum(p[1]) or 2,tonum(p[2]) or 1
-  -- record max level reached so far
-  if(_map_id>dget(32)) dset(32,_map_id)
 
   next_state(play_state)
 end
@@ -1505,15 +1485,7 @@ function unpack_special(sectors,actors)
       -- save player's state
       _plyr:save()
 
-      _map_id+=1
-      -- end game?
-      if _map_id>#_maps_group then
-        -- records best skill completed
-        if(_skill>dget(33)) dset(33,_skill)
-        load(mod_name_.."0.p8",nil,"endgame")
-      end
-      -- load next map
-      load(_maps_group[_map_id]..".p8",nil,_skill..",".._map_id)
+      load(mod_name.."_0.p8",nil,_skill..",".._map_id..",2")
     end
   end
 end
