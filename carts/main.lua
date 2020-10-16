@@ -356,7 +356,7 @@ function draw_walls(segs,v_cache,light)
         if(x1>127) x1=127
         for x=cx0,x1\1 do
           if w0>2.4 then
-            -- top/bottom+color shifing
+            -- top/bottom+perspective correct texture u+color shifing
             local t,b,u,pal1=y0-top*w0,y0-bottom*w0,u0/(w0>>4),(light*min(15,w0<<1))\1
             if(pal0!=pal1) memcpy(0x5f00,0x4300|pal1<<4,16) pal0=pal1
 
@@ -1332,18 +1332,18 @@ end
 -- 3d functions
 local function v_clip(v0,v1,t)
   local invt=1-t
-  local x,y,z=
+  local x,y=
     v0[1]*invt+v1[1]*t,
-    v0[2]*invt+v1[2]*t,
-    v0[3]*invt+v1[3]*t
-    local w=128/z
+    v0[2]
+    --local w=128/z
     return {
-      x,y,z,
-      x=63.5+x*w,
-      y=63.5-y*w,
+      -- z is clipped to near plane
+      x,y,8,
+      x=63.5+(x<<4),
+      y=63.5-(y<<4),
       u=v0.u*invt+v1.u*t,
       v=v0.v*invt+v1.v*t,
-      w=w,
+      w=16,
       seg=v0.seg
     }
 end
