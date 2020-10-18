@@ -235,11 +235,16 @@ function slicefade_state(...)
     end,
     -- draw
     function()
-      cls()
+      local src,mem=loading_gfx.bytes,0x6000
+      for i=0,#src-1 do
+        poke(mem+i,ord(src,i+1))
+      end
+
       for i,r in pairs(r) do
         h[i]=lerp(h[i],129,r)
         sspr(i,0,1,128,i,h[i],1,128)
       end
+      pal(loading_gfx.pal,1)
     end,
     -- init
     function()
