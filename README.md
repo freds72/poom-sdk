@@ -424,18 +424,19 @@ actor weapon {
 
 ### player
 ```
-actor player {
+actor PlayerPawn {
     radius 32
     armor 100
     health 100
     speed 3
     +SHOOTABLE
     +SOLID
+    +DROPOFF
   }
 ```
 ### monster
 ```
-actor monster {
+actor Monster {
     radius 20
     armor 0
     health 50
@@ -445,10 +446,11 @@ actor monster {
 ```
 ### projectile
 ```
-actor projectile {
+actor Projectile {
     damage 1
     speed 5
     +NOGRAVITY
+    +DROPOFF
     +MISSILE
   }
 ```
@@ -507,13 +509,19 @@ Default is 0.
 
 The amount of primary ammo you receive from this weapon.
 
-### Weapon.AmmoUse amount
+### Weapon.AmmoUse _amount_
 The amount of primary ammo the weapon uses per shot.
+
+### Weapon.HUDLabel _name_
+The weapon name as displayed in the weapon selection wheel/hud.
 
 ### Inventory.Icon _sprite_
 Defines the icon this item uses when displayed in the HUD or status bar.
 
 _sprite_ is the Pico-8 character code (as given by ord())
+
+### Inventory.HUDColor _color_
+Defines the icon color (from game palette) this item uses when displayed in the HUD or status bar.
 
 ### AttackSound _sound_
 Defines the sound the actor makes when attacking.
@@ -530,7 +538,7 @@ Defines the sound the actor makes when dying or when a projectile explodes. For 
 
 _sound_ is the sfx id from the user supplied music cart.
 
-### MeleeRange value
+### MeleeRange _value_
 Specifies the maximum distance to a target where a melee attack inflicts damage. Distance is calculated from the attacker's center to the target's center.
 
 Default is 64.
@@ -558,24 +566,43 @@ Supported flags:
 ### SOLID
 
 Set when the object should be solid (blocking). The size of the blocking is defined using the height and radius properties.
-> Automatically given by the Monster combo
+> Automatically given by the Monster class
 
 ### SHOOTABLE
 
 Object can be damaged. If health goes below 0 it enters its death state.
-> Automatically given by the Monster combo
+> Automatically given by the Monster class
+
+### FLOAT
+
+Floating actor that can change height at will (usually used for monsters). Actors will not be able to float properly unless it has NOGRAVITY set.
+
+### NOGRAVITY
+
+Actor is not subject to gravity.
+
+### DONTFALL
+
+Doesn't fall down after being killed.
+
+### DROPOFF
+
+Actor can walk over ledges/taller steps.
+
+> Automatically given by the Projectile class
 
 ### ISMONSTER
 
 Actor is classed as a monster.
-> Automatically given by the Monster combo
+
+> Automatically given by the Monster class
 
 ### MISSILE
 Actor is a projectile. Actors with this flag set will enter their death state when hitting a solid and constantly move at their speed value (without the need of any actor functions) 
 
 Actors with this flag will also be able to go through impassable linedefs.
 
-> Automatically given by the Projectile combo
+> Automatically given by the Projectile class
 
 
 pack_flag(actor, 'solid') | pack_flag(actor, 'shootable')<<1 | pack_flag(actor, 'missile')<<2 | pack_flag(actor, 'ismonster')<<3

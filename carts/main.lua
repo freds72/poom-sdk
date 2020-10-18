@@ -539,11 +539,10 @@ function del_thing(thing)
 end
 
 function unregister_thing_subs(thing)
-  -- remove self from sectors (multiple)
-  local not_missile=thing.actor.flags&0x4==0
   for node,_ in pairs(thing.subs) do
     if(node.things) node.things[thing]=nil
-    if(not_missile) node.sector.things-=1
+    -- remove self from sectors (multiple)
+    if(not thing.actor.is_missile) node.sector.things-=1
   end
 end
 
@@ -556,7 +555,7 @@ function register_thing_subs(node,thing,radius)
     if(not node.things) node.things={}
     node.things[thing]=true
     -- don't count missile actors
-    if(thing.actor.flags&0x4==0) node.sector.things+=1
+    if(not thing.actor.is_missile) node.sector.things+=1
     return
   end
 
@@ -586,7 +585,7 @@ function intersect_sub_sector(segs,p,d,tmin,tmax,radius,res,skipthings)
       -- not already "hit"
       -- not a missile
       -- not dead
-      if thing.intersectid!=intersectid and actor.flags&0x4==0 and not thing.dead then
+      if thing.intersectid!=intersectid and not actor.is_missile and not thing.dead then
         -- overflow 'safe' coordinates
         local m,r={(px-thing[1])>>8,(py-thing[2])>>8},(actor.radius+radius)>>8
         local b,c=v2_dot(m,d),v2_dot(m,m)-r*r
@@ -664,7 +663,7 @@ function hitscan_attack(owner,angle,range,dmg,puff)
   for _,hit in ipairs(hits) do
     local otherthing,fix_move=hit.thing
     if hit.seg then
-      fix_move=intersect_line(hit.seg,h,0,0,true) and hit
+      fix_move=intersect_line(hit.seg,h,0,0,true,true) and hit
     elseif otherthing!=owner and intersect_thing(otherthing,h,0) then
       fix_move=hit
     end
@@ -702,7 +701,7 @@ function line_of_sight(thing,otherthing,maxdist)
     _intersectid+=1
     intersect_sub_sector(thing.ssector,thing,n,0,d,0,hits,true)
     for _,hit in ipairs(hits) do
-      if intersect_line(hit.seg,h,0,0,true) then
+      if intersect_line(hit.seg,h,0,0,true,true) then
         return n
       end
     end
@@ -726,7 +725,7 @@ function make_thing(actor,x,y,z,angle,special)
     trigger=special
   }
   
-  if actor.flags&0x2>0 then
+  if actor.is_shootable then
     -- shootable
     thing=with_physic(with_health(thing))
   end
@@ -743,7 +742,7 @@ local _sector_dmg={
   [115]=-1
 }
 
-function intersect_line(seg,h,height,clearance,is_missile,is_monster)
+function intersect_line(seg,h,height,clearance,is_missile,is_dropoff)
   local ldef=seg.line
   local otherside=ldef[not seg.side]
 
@@ -753,12 +752,12 @@ function intersect_line(seg,h,height,clearance,is_missile,is_monster)
     h+height>otherside[1].ceil or 
     h+clearance<otherside[1].floor or 
     -- avoid monster jumping off cliffs
-    (is_monster and h-otherside[1].floor>clearance)
+    (not is_dropoff and h-otherside[1].floor>clearance)
 end
 
 function intersect_thing(otherthing,h,radius)
   local otheractor=otherthing.actor
-  return otheractor.flags&0x1>0 and
+  return otheractor.is_solid and
     h>=otherthing[3]-radius and 
     h<otherthing[3]+otheractor.height+radius
 end
@@ -767,10 +766,8 @@ end
 function with_physic(thing)
   local actor=thing.actor
   -- actor properties
-  local height,radius,mass,is_missile,is_player,is_monster=actor.height,actor.radius,2*actor.mass,actor.flags&0x4>0,actor.id==1,actor.flags&0x8>0
-  local ss,friction=thing.ssector,is_missile and 0.9967 or 0.9062
-  -- init inventory
-  local forces,velocity={0,0},{0,0,0}
+  local height,radius,mass,is_missile,is_player=actor.height,actor.radius,2*actor.mass,actor.is_missile,actor.id==1
+  local ss,friction,forces,velocity,dz=thing.ssector,is_missile and 0.9967 or 0.9062,{0,0},{0,0},0
   return inherit({
     apply_forces=function(self,x,y)
       -- todo: review 96 arbitrary factor...
@@ -780,7 +777,14 @@ function with_physic(thing)
     update=function(self)
       -- integrate forces
       v2_add(velocity,forces)
-      velocity[3]-=1
+      -- floating actor?
+      if actor.is_float and self.target then
+        dz+=mid((self.target[3]-self[3])>>4,-2,2)
+        -- avoid woobling
+        dz*=friction
+      end
+      -- gravity?
+      if(not actor.is_nogravity or (self.dead and not actor.is_dontfall)) dz-=1
 
       -- friction     
       velocity[1]*=friction
@@ -803,7 +807,7 @@ function with_physic(thing)
         for _,hit in ipairs(hits) do
           local otherthing,fix_move=hit.thing
           if hit.seg then
-            fix_move=intersect_line(hit.seg,h,height,stair_h,is_missile,is_monster) and hit
+            fix_move=intersect_line(hit.seg,h,height,stair_h,is_missile,actor.is_dropoff) and hit
             -- cross special?
             -- todo: supports monster activated triggers
             local ldef=hit.seg.line
@@ -847,6 +851,8 @@ function with_physic(thing)
               if fix_move.dist then
                 v2_add(self,n,-fix_move.dist)
               end
+              -- colliding actor inflicts damage?
+              if(otherthing and actor.damage and otherthing.hit) otherthing:hit((1+rnd(7))*actor.damage,n,self)
             end
           end
         end
@@ -888,20 +894,25 @@ function with_physic(thing)
         end
       end
 
-      -- gravity
       if not is_missile then
-        local dz=velocity[3]
         local h,sector=self[3]+dz,self.sector
         if h<sector.floor then
-          -- fall damage
-          -- see: https://zdoom.org/wiki/Falling_damage
-          local dmg=(((dz*dz)>>7)*11-30)\2
-          if(dmg>0) self:hit(dmg) 
+          -- not fall damage or sector damage for floating actors
+          if not actor.is_float and actor.is_shootable then
+            -- fall damage
+            -- see: https://zdoom.org/wiki/Falling_damage
+            local dmg=(((dz*dz)>>7)*11-30)\2
+            if(dmg>0) self:hit(dmg) 
           
-          -- sector damage (if any)
-          self:hit_sector(_sector_dmg[sector.special])
+            -- sector damage (if any)
+            self:hit_sector(_sector_dmg[sector.special])
+          end
 
-          velocity[3],h=0,sector.floor
+          dz,h=0,sector.floor
+        end
+        -- for floating actors, avoid going through roof!
+        if h+height>sector.ceil then
+          dz,h=0,sector.ceil-height
         end
         self[3]=h
       end
@@ -915,7 +926,7 @@ end
 function with_health(thing)
   local dmg_ttl,dead=0
   local function die(self,dmg)
-    self.dead=true
+    self.dead,self.target=true    
     -- lock state
     dead=true
     -- any special?
@@ -1614,12 +1625,12 @@ function unpack_actors()
     -- A_FaceTarget
     function()
       local speed=mpeek()/255
-      return function(thing)
+      return function(self)
         -- nothing to face to?
-        local otherthing=thing.target
-        if(not otherthing) return
-        local target_angle=atan2(-thing[1]+otherthing[1],thing[2]-otherthing[2])
-        thing.angle=lerp(shortest_angle(target_angle,thing.angle),target_angle,speed)
+        if self.target then
+          local target_angle=atan2(self.target[1]-self[1],self[2]-self.target[2])
+          self.angle=lerp(shortest_angle(target_angle,self.angle),target_angle,speed)   
+        end
       end
     end,
     -- A_Look
@@ -1687,7 +1698,17 @@ function unpack_actors()
         owner=owner.owner or owner
         hitscan_attack(owner,owner.angle,owner.meleerange or 64,dmg,puff)
       end
-    end      
+    end,
+    -- A_SkullAttack
+    function()
+      local speed=unpack_variant()
+      return function(self)
+        -- nothing to face to?
+        if self.target then   
+          self:apply_forces(speed*cos(self.angle),-speed*sin(self.angle))
+        end
+      end
+    end
   }
 
   -- copy "coll" and attach to a property "name" on thing
@@ -1700,20 +1721,26 @@ function unpack_actors()
     end
   end
 
+  
+  -- actor flags layout:
+  -- solid
+  -- shootable
+  -- missile
+  -- monster
+  -- nogravity
+  -- float
+  -- dropoff
+  -- dontfall
+  local all_flags=split("0x1,is_solid,0x2,is_shootable,0x4,is_missile,0x8,is_monster,0x10,is_nogravity,0x20,is_float,0x40,is_dropoff,0x80,is_dontfall",",",1)
   unpack_array(function()
-    local kind,id,state_labels,states,weapons,active_slot,inventory=unpack_variant(),unpack_variant(),{},{},{}
+    local kind,id,flags,state_labels,states,weapons,active_slot,inventory=unpack_variant(),unpack_variant(),mpeek(),{},{},{}
+
     local item={
       id=id,
       kind=kind,
       radius=unpack_fixed(),
       height=unpack_fixed(),
       mass=100,
-      -- flags layout:
-      -- 0x1: solid
-      -- 0x2: shootable
-      -- 0x4: missile
-      -- 0x8: monster
-      flags=mpeek(),
       -- attach actor to this thing
       attach=function(self,thing)
         -- vm state (starts at spawn)
@@ -1765,6 +1792,10 @@ function unpack_actors()
         return thing
       end
     }
+    -- convert numeric flags to "not nil" tests
+    for i=1,#all_flags,2 do
+      if(flags&all_flags[i]!=0) item[all_flags[i+1]]=true
+    end
 
     local properties=unpack_fixed()
     -- warning: update if adding new properties
