@@ -49,7 +49,7 @@ ZDoom Wiki (outstanding content folks!)
     ```
     Expected output:
     ```shell
-    usage: wad_reader.py [-h] --pico-home PICO_HOME --carts-path CARTS_PATH --mod-name MOD_NAME [--map MAP]
+    usage: wad_reader.py [-h] --pico-home PICO_HOME --carts-path CARTS_PATH --mod-name MOD_NAME [--map MAP] [--compress] [--release RELEASE]
 
     optional arguments:
       -h, --help            show this help message and exit
@@ -59,8 +59,9 @@ ZDoom Wiki (outstanding content folks!)
                             path to carts folder where game is exported
       --mod-name MOD_NAME   game cart name (ex: poom)
       --map MAP             map name to compile (ex: E1M1)
-      --compress            Enable compression (default: false)  
-    ```
+      --compress            Enable compression (default: false)
+      --release RELEASE     Generate packages (bin+html) with given version
+      ```
 
 ## Compile & Run Poom
 1. Open a Python command prompt at repo location (e.g. where DECORATE file is)
@@ -604,8 +605,172 @@ Actors with this flag will also be able to go through impassable linedefs.
 
 > Automatically given by the Projectile class
 
+## Actor states
 
-pack_flag(actor, 'solid') | pack_flag(actor, 'shootable')<<1 | pack_flag(actor, 'missile')<<2 | pack_flag(actor, 'ismonster')<<3
+An actor's states can be defined within its DECORATE definition. State sequences describe all the behavior of the actor as well as its animation.
+
+### Usage
+A state definition is started with the states keyword and enclosed by braces '{', '}'.
+
+It consists of the following:
+
+### State labels
+A state label is an identifier followed by a colon (:). State labels give names to state sequences which can then be initiated or checked for using those names.
+
+A state label can be any alphanumeric string (within reason) and is not case sensitive. Some labels (Spawn, See, Death, Ready, Select, Deselect, Fire, etc.) are assumed to exist by the engine for certain actors.
+
+A single state can have several labels, each on a different line. However, most states do not have a label, instead they merely follow other states in sequences.
+
+### State definitions
+The main elements of any given state are the following:
+
+1. Its sprite name
+1. Its frame letter
+1. Its duration in tics
+1. Its associated action function
+1. Its successor (the next state in sequence)
+1. It also might have additional properties which are expressed through special keywords detailed below.
+
+These consist of a sprite name, a frame letter, the duration in tics and optionally additional keywords and an action function name (code pointer). For example:
+
+    STUF C 5 Bright A_Look
+
+Here, STUF is the sprite name, C is the frame letter, 5 the duration, and A_Look the action function.
+
+The successor is defined implicitly as the next defined state, unless a goto, loop, wait, or stop keyword is used to explicitly change it. For instance:
+
+    STUF C 5 Bright A_Look
+    STUF D 5 Bright
+
+Here, the successor for the first state is the second state. The second state's successor is not defined in this example.
+
+When the duration runs out, the actor moves to the next state in the sequence and runs the new state's action function immediately. Note that setting -1 as a duration means infinite duration. The actor, once it enters this state, will never leave it on its own; though it can still be moved to a different state by external actions (e.g., suffering damage might put it in the Pain state).
+
+The next state is automatically implied to be the following letter on a frame sequence, or if there aren't any more states on a line, the states defined in the next line. Alternatively, flow control keywords (loop, wait, goto, stop) listed after a state can change it.
+
+### State keywords
+The existing keywords can be used in a state between the duration and the action function call.
+
+#### Bright
+
+The sprite will be displayed as fullbright while the actor is in this state.
+
+### Flow control
+There are 5 different instructions that control the execution order of an actor's frames directly:
+
+#### loop
+Jumps to the most recently defined state label. This is used for a looping animation. Do not put a loop on a state with a duration of -1, this is unnecessary and can cause problems.
+
+#### stop
+Stops animating this actor. Normally this is used at the end of the death sequences. If the last state has a duration > -1 the actor will be removed. Note that if a state contains only the stop instruction, the actor will behave as if it doesn't have that state. This can be useful, for example, to remove a state that an actor has inherited from its parent.
+
+#### goto label
+Jumps to an arbitrary state in the current actor.
+
+Important note
+This format has been designed for maximum flexibility. As a result no assumptions are made about what the designer wants. States are never implicitly created.
+
+Also, if no flow control is used Poom will continue to the state provided directly after. Consecutive state labels can be used to assign the same frames to more than one state.
+
+### States
+These are the predefined states each actor has access to:
+
+#### Spawn
+Defines the state that is displayed when an actor is spawned. For monsters this is normally also the idle loop.
+> Note: An actor that has just been spawned does not run the codepointer from its first “Spawn” frame. An example of this behavior in the original games is ArchvileFire. It will be called, however, if the actor loops or returns to its Spawn state later. An easy workaround to have actors call a codepointer immediately after spawning consists in having the very first frame have a duration of 0 tics, followed by another frame in which the codepointer instruction is given. Another solution is to use the NoDelay keyword.
+
+#### See
+Defines the walking animation for a monster. Note that this state must be present for actors which are able to chase and attack other actors.
+#### Melee
+Defines the melee (near) attack.
+#### Missile
+Defines the missile (far) attack.
+#### Pain
+Defines the pain action. Multiple Pain states can be used depending on the type of damage inflicted. See custom damage types.
+#### Death
+Defines the normal death sequence. Multiple Death states can be used depending on the type of damage that kills the actor. See custom damage types. Also entered by projectiles when hitting a wall (or an actor as well if the Crash and/or XDeath states are not defined).
+
+### Example
+This is an example of a state sequence. The rest of this actor has been removed for readability:
+
+    actor ZombieMan 3004
+    {
+       ...
+       states
+       {
+       Spawn:
+           POSS AB 10 A_Look
+           loop
+       See:
+           POSS A 4 A_Chase
+           POSS A 4 A_Chase
+           POSS B 4 A_Chase
+           POSS B 4 A_Chase
+           loop
+       Missile:
+           POSS E 10 A_FaceTarget
+           POSS F 8 A_PosAttack
+           POSS E 8
+           goto See
+       Pain:
+           POSS G 3
+           POSS G 3 A_Pain
+           goto See
+       Death:
+           POSS H 5
+           POSS I 5
+           POSS J 5
+           POSS K 5
+           POSS L -1
+           stop
+       }
+    }
+
+> Note: The first frame of the “Spawn” state, “POSS A 10”, contains a codepointer, A_Look. This codepointer is not called the very first time the zombie is spawned in the map, so it has to wait 10 tics to get into its second frame, “POSS B 10”. From then on, it will call all its codepointers reliably. If it runs out of targets, and since it has no “Idle” state, it will return to its Spawn state where it will call A_Look immediately, even in the A frame.
+
+## Decorate Monster AI functions
+
+### A_FireBullets(_angle spread_horz, angle spread_vert, int numbullets, int damage , string pufftype_)
+
+### A_PlaySound(_sound whattoplay_)
+
+Plays the specified sound.
+
+### A_FireProjectile(_string missiletype_)
+
+Fires a projectile
+
+### A_WeaponReady
+
+A_WeaponReady is responsible for checking the fire keys and weapon changing keys. This function should be called in a weapon's “Ready” state so the weapon can be fired.
+
+### A_Explode(_int damage, int distance_)
+
+Performs an explosive (radius) attack.
+
+### A_FaceTarget([_float turnspeed_])
+
+Changes the calling actor's angle to face its current target. 
+
+### A_Look
+
+Looks for players or other attackable actors in the game. If it finds a target, it enters its “See” state.
+
+### A_Chase
+
+This is the standard monster walking function which has to be used in the walking frames of a monster. Typically, it is used in an actor's "See" state or a custom equivalent. When called, actors usually change their directions to a strict 45 degree angle to give the effect of pursuit. This angle changes based on which direction the target is, no matter if the calling actor can see it or not.
+
+### A_Light(_int intensity_)
+
+Set ambiant light - automatically decays.
+
+### A_MeleeAttack(_int damage, string pufftype_)
+
+Performs a melee attack.
+
+### A_SkullAttack([_int speed_])
+
+The attack of Doom's lost soul. The calling actor charges at its current target. The speed parameter defines the speed of the charge (20 by default).
 
 # Music & Sound
 
