@@ -1,7 +1,3 @@
-pico-8 cartridge // http://www.pico-8.com
-version 29
-__lua__
-
 -- globals
 local _bsp,_cam,_plyr,_things,_sprite_cache,_actors,btns,wp_hud
 local _onoff_textures={[0]=0}
@@ -830,7 +826,7 @@ function with_physic(thing)
             if is_missile then
               -- fix position & velocity
               v2_add(self,move_dir,fix_move.ti)
-              velocity={0,0,0}
+              velocity={0,0}
               -- explosion sound (if any)
               if(actor.deathsound) sfx(actor.deathsound)
               -- death state
@@ -869,8 +865,7 @@ function with_physic(thing)
         self.subs={}
         register_thing_subs(_bsp,self,radius/2)
       else
-        velocity[1]=0
-        velocity[2]=0
+        velocity={0,0}
       end
 
       -- triggers?
@@ -2094,7 +2089,6 @@ function unpack_map(skill,actors)
       unpack_fixed(),unpack_fixed(),
       -- distance to plane
       unpack_fixed(),
-      bbox={},
       leaf={}
     })
     local flags=mpeek()
@@ -2104,6 +2098,7 @@ function unpack_map(skill,actors)
         node[side]=sub_sectors[unpack_variant()]
       else
         -- bounding box only on non-leaves
+        node.bbox=node.bbox or {}
         node.bbox[side]=unpack_bbox()
         node[side]=nodes[unpack_variant()]
       end
@@ -2139,9 +2134,9 @@ function unpack_map(skill,actors)
 
   -- things with special behaviors
   unpack_array(function()
-    local thing=unpack_thing()
+    -- make sure to unpack special even if things does not appear on skill level
+    local thing,special=unpack_thing(),unpack_special(sectors,actors)
     if thing then
-      local special=unpack_special(sectors,actors) 
       add(thing,function(self)
           -- avoid reentrancy
           self.trigger=nil
