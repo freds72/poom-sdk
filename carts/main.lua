@@ -1,6 +1,6 @@
 -- globals
 local _bsp,_cam,_plyr,_things,_sprite_cache,_actors,btns,wp_hud
-local _onoff_textures={[0]=0}
+local _onoff_textures,_transparent_textures={[0]=0},{}
 local _ambientlight,_ammo_factor,_intersectid,_msg=0,1,0
 
 --local k_far,k_near=0,2
@@ -328,7 +328,7 @@ function draw_walls(segs,v_cache,light)
         end
         -- span rasterization
         -- pick correct texture "major"
-        local dx,u0=x1-x0,v0[seg[9]]*w0
+        local dx,u0,midtex_tc=x1-x0,v0[seg[9]]*w0,_transparent_textures[midtex]
         local cx0,dy,du,dw=x0\1+1,(y1-y0)/dx,(v1[seg[9]]*w1-u0)/dx,((w1-w0)<<4)/dx
         w0<<=4
         local sx=cx0-x0    
@@ -369,7 +369,10 @@ function draw_walls(segs,v_cache,light)
             if midtex!=0 then
               -- texture selection
               poke4(0x5f38,midtex)
+              -- enable transparent black if needed
+              poke(0x5f00,midtex_tc)
               tline(x,ct,x,b,u,(ct-t)/w0+yoffset,0,1/w0)
+              poke(0x5f00,0)
             end   
           end
           y0+=dy
@@ -551,14 +554,15 @@ function register_thing_subs(node,thing,radius)
 end
 
 -- http://geomalgorithms.com/a13-_intersect-4.html
--- returns an array of hits
+-- calls intersect_cb for each hit
+-- must return true to stop intersection search
 -- t: impact depth (to fix velocity)
 -- ti: impact on velocity vector
-function intersect_sub_sector(segs,p,d,tmin,tmax,radius,res,skipthings)
+function intersect_sub_sector(segs,p,d,tmin,tmax,radius,intersect_cb,skipthings)
   local intersectid,_tmax,px,py,dx,dy,othersector=_intersectid,tmax,p[1],p[2],d[1],d[2]
 
   if not skipthings then
-    local lasthit=#res+1
+    local hits={}
     for thing,_ in pairs(segs.things) do
       local actor=thing.actor
       -- not already "hit"
@@ -579,19 +583,22 @@ function intersect_sub_sector(segs,p,d,tmin,tmax,radius,res,skipthings)
             if(t<tmin) t=tmin
             -- record hit
             if t>=tmin and t<tmax then
-              local thingi=#res+1
-              for i=lasthit,#res do
+              local thingi=#hits+1
+              for i=1,#hits do
                 -- find first largest hit
-                if(t<res[i].t) thingi=i break
+                if(t<hits[i].t) thingi=i break
               end
               -- insert new thing
-              add(res,{ti=t,t=(radius-t)/radius,thing=thing},thingi)
+              add(hits,{ti=t,t=(radius-t)/radius,thing=thing},thingi)
             end
           end
         end
         -- avoid duplicate hits
         thing.intersectid=intersectid
       end
+    end
+    for _,hit in ipairs(hits) do
+      if(intersect_cb(hit)) return
     end
   end
 
@@ -615,7 +622,7 @@ function intersect_sub_sector(segs,p,d,tmin,tmax,radius,res,skipthings)
           -- if(tmax<tmin) return 
         end
         if s0.line and (dist_a<radius or dist_b<radius) then
-          add(res,{ti=t,t=mid(dist_a/(dist_a-dist_b),0,1),dist=dist_a<radius and inseg and (radius-dist_a),seg=s0,n=n})
+          if(intersect_cb({ti=t,t=mid(dist_a/(dist_a-dist_b),0,1),dist=dist_a<radius and inseg and (radius-dist_a),seg=s0,n=n})) return
         end
       end
     end
@@ -623,16 +630,15 @@ function intersect_sub_sector(segs,p,d,tmin,tmax,radius,res,skipthings)
 
   if tmin<=tmax and tmax<_tmax and othersector then
     -- any remaining segment to check?
-    intersect_sub_sector(othersector,p,d,tmax,_tmax,radius,res,skipthings)
+    intersect_sub_sector(othersector,p,d,tmax,_tmax,radius,intersect_cb,skipthings)
   end
 end
 
 -- scan attack (e.g. will hit anything in range)
 function hitscan_attack(owner,angle,range,dmg,puff)
-  local h,hits,move_dir=owner[3]+32,{},{cos(angle),-sin(angle)}
+  local h,move_dir=owner[3]+32,{cos(angle),-sin(angle)}
   _intersectid+=1
-  intersect_sub_sector(owner.ssector,owner,move_dir,owner.actor.radius/2,range,0,hits)    
-  for _,hit in ipairs(hits) do
+  intersect_sub_sector(owner.ssector,owner,move_dir,owner.actor.radius/2,range,0,function(hit)    
     local otherthing,fix_move=hit.thing
     if hit.seg then
       fix_move=intersect_line(hit.seg,h,0,0,true,true) and hit
@@ -652,31 +658,27 @@ function hitscan_attack(owner,angle,range,dmg,puff)
 
       -- hit thing
       if(otherthing and otherthing.hit) otherthing:hit(dmg,move_dir,owner)
-      return
+      return true
     end
-  end
+  end)
 end
 
 -- returns distance and normal to target (if visible)
 function line_of_sight(thing,otherthing,maxdist)
   -- pvs check
-  local pvs,id=thing.ssector.pvs,otherthing.ssector.id
-
-  local n,d=v2_normal(v2_make(thing,otherthing))
-  if(band(pvs[id\32],0x0.0001<<(id&31))==0) return n
+  local id,n,d=otherthing.ssector.id,v2_normal(v2_make(thing,otherthing))
+  if(band(thing.ssector.pvs[id\32],0x0.0001<<(id&31))==0) return n
 
   -- in radius?
   d=max(d-thing.actor.radius)
   if d<maxdist then
     -- line of sight?
-    local h,hits,blocking=thing[3]+24,{}
+    local h=thing[3]+24
     _intersectid+=1
-    intersect_sub_sector(thing.ssector,thing,n,0,d,0,hits,true)
-    for _,hit in ipairs(hits) do
-      if intersect_line(hit.seg,h,0,0,true,true) then
-        return n
-      end
-    end
+    intersect_sub_sector(thing.ssector,thing,n,0,d,0,function(hit)
+      -- cannot see
+      if(intersect_line(hit.seg,h,0,0,true,true)) d=nil return true
+    end,true)
     -- normal and distance to hit
     return n,d
   end
@@ -763,20 +765,17 @@ function with_physic(thing)
       velocity[2]*=friction
       
       -- check collision with world
-      local move_dir,move_len,hits=v2_normal(velocity)
+      local move_dir,move_len=v2_normal(velocity)
       
       -- cancel small moves
       if move_len>1/16 then
         local h,stair_h=self[3],is_missile and 0 or 24
-        hits={}
 
         unregister_thing_subs(self)
         
         -- check intersection with actor radius
         _intersectid+=1
-        intersect_sub_sector(ss,self,move_dir,0,move_len,radius,hits)    
-        -- fix position
-        for _,hit in ipairs(hits) do
+        intersect_sub_sector(ss,self,move_dir,0,move_len,radius,function(hit)
           local otherthing,fix_move=hit.thing
           if hit.seg then
             fix_move=intersect_line(hit.seg,h,height,stair_h,is_missile,actor.is_dropoff) and hit
@@ -806,7 +805,7 @@ function with_physic(thing)
               -- hit thing
               if(otherthing and otherthing.hit) otherthing:hit((1+rnd(7))*actor.damage,move_dir,self.owner)
               -- stop at first wall/thing
-              break
+              return true
             else
               local n=fix_move.n or v2_normal(v2_make(self,otherthing))
               local fix=-fix_move.t*v2_dot(n,velocity)
@@ -823,7 +822,7 @@ function with_physic(thing)
               if(otherthing and actor.damage and otherthing.hit) otherthing:hit((1+rnd(7))*actor.damage,n,self)
             end
           end
-        end
+        end)
               
         -- apply move
         v2_add(self,velocity)
@@ -843,22 +842,18 @@ function with_physic(thing)
       -- triggers?
       -- check triggers/bumps/...
       if is_player then
-        hits={}
-        intersect_sub_sector(ss,self,{cos(self.angle),-sin(self.angle)},0,radius+24,0,hits,true)    
-        for _,hit in ipairs(hits) do
-          if hit.seg then
-            local ldef=hit.seg.line
-            -- buttons
-            if ldef.trigger and ldef.flags&0x8>0 then
-              -- use special?
-              if btnp(🅾️) then
-                ldef.trigger(self)
-              end
-              -- trigger/message only closest hit
-              break
+        intersect_sub_sector(ss,self,{cos(self.angle),-sin(self.angle)},0,radius+24,0,function(hit)
+          local ldef=hit.seg.line
+          -- buttons
+          if ldef.trigger and ldef.flags&0x8>0 then
+            -- use special?
+            if btnp(🅾️) then
+              ldef.trigger(self)
             end
+            -- trigger/message only closest hit
+            return true
           end
-        end
+        end,true)    
       end
 
       if not is_missile then
@@ -1159,6 +1154,8 @@ function next_state(fn,...)
   end
 end
 
+_max_cpu,_max_cpu_ttl=0,0
+
 function play_state()
   btns,wp_hud={}
   
@@ -1213,7 +1210,12 @@ function play_state()
       if(_msg) print(_msg,64-#_msg*2,120,15)
 
       -- debug messages
-      local cpu=stat(1).."|"..stat(0)
+      local cpu=stat(1)
+      _max_cpu_ttl-=1
+      if(_max_cpu_ttl<0) _max_cpu=0
+      if(cpu>_max_cpu) _max_cpu=cpu _max_cpu_ttl=30
+
+      cpu=cpu.."|".._max_cpu
     
       print(cpu,2,3,3)
       print(cpu,2,2,15)    
@@ -2082,6 +2084,11 @@ function unpack_map(skill,actors)
   -- texture pairs
   unpack_array(function()
     _onoff_textures[unpack_fixed()]=unpack_fixed()
+  end)
+
+  -- transparent textures
+  unpack_array(function()
+    _transparent_textures[unpack_fixed()]=0x10
   end)
 
   -- things
