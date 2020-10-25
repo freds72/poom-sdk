@@ -7,7 +7,7 @@ local _ambientlight,_ammo_factor,_intersectid,_msg=0,1,0
 --local k_right,k_left=4,8
 
 -- copy color gradients (16*16 colors x 2) to memory
-memcpy(0x4300,0x1000,512)
+memcpy(0x4300,0x0,512)
 -- immediately install palette (for loading screen)
 memcpy(0x5f10,0x4400,16)
 
@@ -172,7 +172,7 @@ function make_sprite_cache(tiles)
 				remove(entry)
 			else
 				-- allocate a new 16x16 entry
-				local sx,sy=(len<<4)&127,64+((len\8)<<4)
+				local sx,sy=(len<<4)&127,(len\8)<<4
         -- list too large?
         -- 32: cache max entry size
 				if len>31 then
