@@ -1,6 +1,12 @@
 -- background menu
 local snd="36530600324c00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000060100003e0c3fa445d819c0158b1589158515841583158215811381138003800380538000000000000000000000000000000000000000000000000000000000000000000301000"
 
+-- supports player 1 or player 2 input
+local _btnp=btnp
+function btnp(b)
+  return _btnp(b,0) or _btnp(b,1)
+end
+
 -- copy image text to spritesheet/memory
 function unpack_gfx(src,rows)
   local addr=rows and 0x4e00 or 0x0
@@ -71,13 +77,8 @@ function menu_state()
   if(max_map_id>#_maps_label) max_map_id=#_maps_label dset(32,max_map_id)
   if(max_map_id<=0) max_map_id=1 dset(32,max_map_id)
 
-  -- read max skill reached
-  local max_skill=dget(33)
-  if(max_skill>#menus[2][2]) max_skill=#menus[2][2] dset(33,max_skill)
-  if(max_skill<2) max_skill=2 dset(33,max_skill)
-
   menus[1].max=max_map_id
-  menus[2].max=max_skill
+  menus[2].max=#menus[2][2]
 
   return
     function()
@@ -197,14 +198,13 @@ function launch_state(skill,id)
 end
 
 function endgame_state(skill)
+  local ttl=9000
   -- todo: music??
   
-  -- record max skill reached
-  if(skill>dget(33)) dset(33,skill)
-
   return
     function()
-      if btnp()!=0 then
+      ttl-=1
+      if ttl<0 or btnp()!=0 then
         -- back to startup screen
         next_state(fadetoblack_state,start_state)
       end
