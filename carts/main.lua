@@ -257,18 +257,17 @@ function polyfill(v,xoffset,yoffset,tex,light)
       if span then
       -- limit visibility
         if w0>0.15 then
-          -- collect boundaries + color shitfint
-          local a,b,pal1=x0,span,(light*min(15,w0<<5))\1
+          -- collect boundaries + color shitfint + mode 7
+          local a,b,rz,pal1=x0,span,cy/(y-63.5),(light*min(15,w0<<5))\1
           if(a>b) a=span b=x0
           -- color shifing
           if(pal0!=pal1) memcpy(0x5f00,0x4300|pal1<<4,16) pal0=pal1
 
           -- mode7 texturing
-          local rz=cy/(y-63.5)
-          local rx=rz*(a-63.5)>>7
+          local rx=rz*(a\1-63.5)>>7
         
           -- camera space
-          tline(a,y,b,y,ca*rx+sa*rz+cx,ca*rz+cz-sa*rx,ca*rz>>7,-sa*rz>>7)   
+          tline(a,y,b,y,ca*rx+sa*rz+cx,ca*rz-sa*rx+cz,ca*rz>>7,-sa*rz>>7)   
         end       
       else
         spans[y]=x0
@@ -1184,8 +1183,6 @@ function play_state()
     add_thing(thing)
   end
   -- todo: release actors
-
-  assert(_plyr,"missing player in level")
 
   _cam=make_camera()
 
