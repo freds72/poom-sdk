@@ -16,9 +16,7 @@ end
 -- camera factory
 function make_camera()
   return {
-    m=split"1,0,0,0,1,0",
-    u=1,
-    v=0,
+    -- must be called before any rendering
     track=function(self,pos,angle,height)
       local ca,sa=-sin(angle),cos(angle)
       self.u=ca
@@ -217,17 +215,19 @@ end
 -- calls 'visit' function
 function visit_bsp(node,pos,visitor)
   local side=v2_dot(node,pos)<=node[3]
-  visitor(node,side,pos,visitor)
   visitor(node,not side,pos,visitor)
+  visitor(node,side,pos,visitor)
 end
 
 function find_sub_sector(node,pos)
-  local side=v2_dot(node,pos)<=node[3]
-  if node.leaf[side] then
-    -- leaf?
-    return node[side]
-  end    
-  return find_sub_sector(node[side],pos)
+  while true do
+    local side=v2_dot(node,pos)<=node[3]
+    if node.leaf[side] then
+      -- leaf?
+      return node[side]
+    end
+    node=node[side]
+  end
 end
 
 -- floor/ceiling n-gon filling routine
@@ -255,11 +255,11 @@ function polyfill(v,xoffset,yoffset,tex,light)
     for y=cy0,y1\1 do
       local span=spans[y]
       if span then
-      -- limit visibility
+        -- limit visibility
         if w0>0.15 then
           -- collect boundaries + color shitfint + mode 7
           local a,b,rz,pal1=x0,span,cy/(y-63.5),(light*min(15,w0<<5))\1
-          if(a>b) a=span b=x0
+          if(a>b) a=span+0 b=x0+0
           -- color shifing
           if(pal0!=pal1) memcpy(0x5f00,0x4300|pal1<<4,16) pal0=pal1
 
@@ -276,119 +276,33 @@ function polyfill(v,xoffset,yoffset,tex,light)
       x0+=dx
       w0+=dw
     end		
-    x0=_x1
-    y0=_y1
-    w0=_w1
+    x0=_x1+0
+    y0=_y1+0
+    w0=_w1+0
   end
 end
 
-function draw_walls(segs,v_cache,light)
-  -- get heights
-  local sector=segs.sector
-  local v0,top,bottom,pal0=v_cache[#v_cache],sector.ceil>>4,sector.floor>>4
-  local x0,y0,w0=v0.x,v0.y,v0.w
-
-  for i,v1 in ipairs(v_cache) do
-    local seg,x1,y1,w1=v0.seg,v1.x,v1.y,v1.w
-    local _x1,ldef=x1,seg.line
-    -- logical split or wall?
-    -- front facing?
-    if x0<x1 and ldef then
-      -- dual?
-      local facingside,otherside,otop,obottom=ldef[seg.side],ldef[not seg.side]
-      -- peg bottom?
-      local yoffset,yoffsettop,_,toptex,midtex,bottomtex=bottom-top,bottom-top,unpack(facingside)
-      -- no need to draw untextured walls
-      if toptex|midtex|bottomtex!=0 then
-        -- fix animated side walls (elevators)
-        if ldef.flags&0x4!=0 then
-          yoffset=0
-        end
-        if otherside then
-          -- visible other side walls?
-          otop=otherside[1].ceil>>4
-          obottom=otherside[1].floor>>4
-          -- offset animated walls (doors)
-          yoffset=0
-          if ldef.flags&0x4!=0 then
-            yoffsettop=otop-top
-          end
-          -- make sure bottom is not crossing this side top
-          obottom=min(top,obottom)
-          otop=max(bottom,otop)
-          -- not visible?
-          if(top<=otop) otop=nil
-          if(bottom>=obottom) obottom=nil
-          -- kill top/bottom if no textures (eg 0)
-          otop=toptex!=0 and otop
-          obottom=bottomtex!=0 and obottom
-        end
-        -- span rasterization
-        -- pick correct texture "major"
-        local dx,u0,midtex_tc=x1-x0,v0[seg[9]]*w0,_transparent_textures[midtex]
-        local cx0,dy,du,dw=x0\1+1,(y1-y0)/dx,(v1[seg[9]]*w1-u0)/dx,((w1-w0)<<4)/dx
-        w0<<=4
-        local sx=cx0-x0    
-        if(x0<0) y0-=x0*dy u0-=x0*du w0-=x0*dw cx0=0 sx=0
-        y0+=sx*dy
-        u0+=sx*du
-        w0+=sx*dw
-        
-        if(x1>127) x1=127
-        for x=cx0,x1\1 do
-          if w0>2.4 then
-            -- top/bottom+perspective correct texture u+color shifing
-            local t,b,u,pal1=y0-top*w0,y0-bottom*w0,u0/(w0>>4),(light*min(15,w0<<1))\1
-            if(pal0!=pal1) memcpy(0x5f00,0x4300|pal1<<4,16) pal0=pal1
-
-            -- top wall side between current sector and back sector
-            local ct=t\1+1
-
-            if otop then
-              poke4(0x5f38,toptex)             
-              local ot=y0-otop*w0
-              tline(x,ct,x,ot,u,(ct-t)/w0+yoffsettop,0,1/w0)
-              -- new window top
-              t=ot
-              ct=ot\1+1
-            end
-            -- bottom wall side between current sector and back sector     
-            if obottom then
-              poke4(0x5f38,bottomtex)             
-              local ob=y0-obottom*w0
-              local cob=ob\1+1
-              tline(x,cob,x,b,u,(cob-ob)/w0,0,1/w0)
-              -- new window bottom
-              b=ob
-            end
-    
-            -- middle wall?
-            if midtex!=0 then
-              -- texture selection
-              poke4(0x5f38,midtex)
-              -- enable transparent black if needed
-              poke(0x5f00,midtex_tc)
-              tline(x,ct,x,b,u,(ct-t)/w0+yoffset,0,1/w0)
-              poke(0x5f00,0)
-            end   
-          end
-          y0+=dy
-          u0+=du
-          w0+=dw
-        end
-      end
-    end
-    v0=v1
-    x0=_x1
-    y0=y1
-    w0=w1
-  end
+local function v_clip(v0,v1,t)
+  local invt=1-t
+  local x,y=
+    v0[1]*invt+v1[1]*t,
+    v0[2]
+    --local w=128/z
+    return {
+      -- z is clipped to near plane
+      x,y,8,
+      x=63.5+(x<<4),
+      y=63.5-(y<<4),
+      u=v0.u*invt+v1.u*t,
+      v=v0.v*invt+v1.v*t,
+      w=16,
+      seg=v0.seg
+    }
 end
 
--- ceil/floor/wal rendering
-function draw_flats(v_cache,segs,things)
-  local verts,outcode,nearclip={},0xffff,0
-  local m1,m3,m4,m8,m9,m11,m12=unpack(_cam.m)
+-- ceil/floor/wall rendering
+function draw_flats(v_cache,segs)
+  local verts,outcode,nearclip,m1,m3,m4,m8,m9,m11,m12={},0xffff,0,unpack(_cam.m)
   
   -- to cam space + clipping flags
   for i,seg in ipairs(segs) do
@@ -418,17 +332,131 @@ function draw_flats(v_cache,segs,things)
   end
   -- out of screen?
   if outcode==0 then
-    if(nearclip!=0) verts=z_poly_clip(verts)
+    if nearclip!=0 then
+      -- near clipping required?
+      local res,v0={},verts[#verts]
+      local d0=v0[3]-8
+      for i=1,#verts do
+        local v1=verts[i]
+        local d1=v1[3]-8
+        if d1>0 then
+          if d0<=0 then
+            res[#res+1]=v_clip(v0,v1,d0/(d0-d1))
+          end
+          res[#res+1]=v1
+        elseif d0>0 then
+          res[#res+1]=v_clip(v0,v1,d0/(d0-d1))
+        end
+        v0,d0=v1,d1
+      end
+      verts=res
+    end
+
     if #verts>2 then
       local sector,pal0=segs.sector
-      local light,things=max(sector.lightlevel,_ambientlight),{}
+      local floor,ceil,light,things=sector.floor,sector.ceil,max(sector.lightlevel,_ambientlight),{}
       -- not visible?
-      if(sector.floor+m8<0) polyfill(verts,sector.tx or 0,sector.floor,sector.floortex,light)
-      if(sector.ceil+m8>0) polyfill(verts,0,sector.ceil,sector.ceiltex,light)
+      if(floor+m8<0) polyfill(verts,sector.tx or 0,floor,sector.floortex,light)
+      if(ceil+m8>0) polyfill(verts,0,ceil,sector.ceiltex,light)
 
-      -- walls
-      draw_walls(segs,verts,light)
-
+      -- draw walls
+      -- get heights
+      local v0,top,bottom=verts[#verts],ceil>>4,floor>>4
+      local x0,y0,w0=v0.x,v0.y,v0.w
+    
+      for i,v1 in ipairs(verts) do
+        local seg,x1,y1,w1=v0.seg,v1.x,v1.y,v1.w
+        local _x1,ldef=x1,seg.line
+        -- logical split or wall?
+        -- front facing?
+        if x0<x1 and ldef then
+          -- dual?
+          local facingside,otherside,otop,obottom=ldef[seg.side],ldef[not seg.side]
+          -- peg bottom?
+          local yoffset,yoffsettop,_,toptex,midtex,bottomtex=bottom-top,bottom-top,unpack(facingside)
+          -- no need to draw untextured walls
+          if toptex|midtex|bottomtex!=0 then
+            -- fix animated side walls (elevators)
+            if ldef.flags&0x4!=0 then
+              yoffset=0
+            end
+            if otherside then
+              -- visible other side walls?
+              otop=otherside[1].ceil>>4
+              obottom=otherside[1].floor>>4
+              -- offset animated walls (doors)
+              yoffset=0
+              if ldef.flags&0x4!=0 then
+                yoffsettop=otop-top
+              end
+              -- make sure bottom is not crossing this side top
+              if(obottom>top) obottom=top
+              if(otop<bottom) otop=bottom
+              -- not visible?
+              if(top<=otop) otop=nil
+              if(bottom>=obottom) obottom=nil
+            end
+            -- span rasterization
+            -- pick correct texture "major"
+            local dx,u0,midtex_tc=x1-x0,v0[seg[9]]*w0,_transparent_textures[midtex]
+            local cx0,dy,du,dw=x0\1+1,(y1-y0)/dx,(v1[seg[9]]*w1-u0)/dx,((w1-w0)<<4)/dx
+            w0<<=4
+            local sx=cx0-x0    
+            if(x0<0) y0-=x0*dy u0-=x0*du w0-=x0*dw cx0=0 sx=0
+            y0+=sx*dy
+            u0+=sx*du
+            w0+=sx*dw
+            
+            if(x1>127) x1=127
+            for x=cx0,x1\1 do
+              if w0>2.4 then
+                -- top/bottom+perspective correct texture u+color shifing
+                local t,b,u,pal1=y0-top*w0,y0-bottom*w0,u0/(w0>>4),(light*min(15,w0<<1))\1
+                if(pal0!=pal1) memcpy(0x5f00,0x4300|pal1<<4,16) pal0=pal1
+    
+                -- top wall side between current sector and back sector
+                local ct=t\1+1
+    
+                if otop then
+                  poke4(0x5f38,toptex)             
+                  local ot=y0-otop*w0
+                  tline(x,ct,x,ot,u,(ct-t)/w0+yoffsettop,0,1/w0)
+                  -- new window top
+                  t=ot+0
+                  ct=ot\1+1
+                end
+                -- bottom wall side between current sector and back sector     
+                if obottom then
+                  poke4(0x5f38,bottomtex)             
+                  local ob=y0-obottom*w0
+                  local cob=ob\1+1
+                  tline(x,cob,x,b,u,(cob-ob)/w0,0,1/w0)
+                  -- new window bottom
+                  b=ob+0
+                end
+        
+                -- middle wall?
+                if midtex!=0 then
+                  -- texture selection
+                  poke4(0x5f38,midtex)
+                  -- enable transparent black if needed
+                  poke(0x5f00,midtex_tc)
+                  tline(x,ct,x,b,u,(ct-t)/w0+yoffset,0,1/w0)
+                  poke(0x5f00,0)
+                end   
+              end
+              y0+=dy
+              u0+=du
+              w0+=dw
+            end
+          end
+        end
+        v0=v1
+        x0=_x1+0
+        y0=y1+0
+        w0=w1+0
+      end
+      
       -- draw things (if any) in this convex space
       for thing,_ in pairs(segs.things) do
         -- todo: cache thing projection
@@ -824,8 +852,18 @@ function with_physic(thing)
         -- apply move
         v2_add(self,velocity)
 
+        -- trail?
+        if actor.trailtype  then
+          local puffthing=make_thing(actor.trailtype,self[1],self[2],0,self.angle)
+          -- todo: get height from properties
+          -- todo: improve z setting
+          puffthing[3]=h
+          add_thing(puffthing)
+        end
+
         -- refresh sector after fixed collision
         ss=find_sub_sector(_bsp,self)
+
         self.sector=ss.sector
         self.ssector=ss
 
@@ -997,7 +1035,7 @@ function attach_plyr(thing,actor,skill)
           if(_btns[0x13]) dz=-1
         end
 
-        self.angle-=da>>8
+        self.angle-=da/256
         local ca,sa=cos(self.angle),-sin(self.angle)
         self:apply_forces(dz*ca-dx*sa,dz*sa+dx*ca,speed)
 
@@ -1118,10 +1156,7 @@ function draw_bsp()
   -- draw bsp & visible things
   -- 
   local pvs,v_cache=_plyr.ssector.pvs,{}
-
-  -- visit bsp
   visit_bsp(_bsp,_plyr,function(node,side,pos,visitor)
-    side=not side
     if node.leaf[side] then
       local subs=node[side]
       -- potentially visible?
@@ -1179,7 +1214,6 @@ function play_state()
       _plyr:load(_actors)
       thing=_plyr
     end
-    -- 
     add_thing(thing)
   end
   -- todo: release actors
@@ -1306,45 +1340,6 @@ function _update()
 end
 
 -->8
--- 3d functions
-local function v_clip(v0,v1,t)
-  local invt=1-t
-  local x,y=
-    v0[1]*invt+v1[1]*t,
-    v0[2]
-    --local w=128/z
-    return {
-      -- z is clipped to near plane
-      x,y,8,
-      x=63.5+(x<<4),
-      y=63.5-(y<<4),
-      u=v0.u*invt+v1.u*t,
-      v=v0.v*invt+v1.v*t,
-      w=16,
-      seg=v0.seg
-    }
-end
-
-function z_poly_clip(v)
-  local res,v0={},v[#v]
-	local d0=v0[3]-8
-	for i=1,#v do
-		local v1=v[i]
-		local d1=v1[3]-8
-		if d1>0 then
-      if d0<=0 then
-        res[#res+1]=v_clip(v0,v1,d0/(d0-d1))
-      end
-			res[#res+1]=v1
-		elseif d0>0 then
-      res[#res+1]=v_clip(v0,v1,d0/(d0-d1))
-    end
-		v0,d0=v1,d1
-	end
-	return res
-end
-
--->8
 -- data unpacking functions
 -- unpack 1 or 2 bytes
 function unpack_variant()
@@ -1371,6 +1366,15 @@ end
 function unpack_bbox()
   local t,b,l,r=unpack_fixed(),unpack_fixed(),unpack_fixed(),unpack_fixed()
   return {l,b,l,t,r,t,r,b}
+end
+
+function unpack_chr()
+  return chr(mpeek())
+end
+
+-- inventory & things
+function unpack_actor_ref(actors)
+  return actors[unpack_variant()]
 end
 
 function unpack_special(sectors,actors)
@@ -1489,39 +1493,14 @@ function unpack_actors()
   end)
 
   -- inventory & things
-  local unpack_actor_ref=function()
-    return actors[unpack_variant()]
-  end
-
   -- actor properties + skill ammo factor
-  local properties_factory={
-    {0x0.0001,"health"},
-    {0x0.0002,"armor"},
-    {0x0.0004,"amount"},
-    {0x0.0008,"maxamount"},
-    -- convert icon code into character
-    {0x0.0010,"icon",function() return chr(mpeek()) end},
-    {0x0.0020,"slot",mpeek},
-    {0x0.0040,"ammouse"},
-    {0x0.0080,"speed"},
-    {0x0.0100,"damage"},
-    {0x0.0200,"ammotype",unpack_actor_ref},
-    {0x0.0800,"mass"},
-    -- some actor have multiple sounds (weapon for ex.)
-    {0x0.1000,"pickupsound"},
-    {0x0.2000,"attacksound"},
-    {0x0.4000,"hudcolor"},
-    {0x0.8000,"deathsound"},
-    {0x1,"meleerange"},
-    {0x2,"maxtargetrange"},
-    {0x4,"ammogive"}
-  }
+  local properties_factory=split("0x0.0001,health,unpack_variant,0x0.0002,armor,unpack_variant,0x0.0004,amount,unpack_variant,0x0.0008,maxamount,unpack_variant,0x0.0010,icon,unpack_chr,0x0.0020,slot,mpeek,0x0.0040,ammouse,unpack_variant,0x0.0080,speed,unpack_variant,0x0.0100,damage,unpack_variant,0x0.0200,ammotype,unpack_actor_ref,0x0.0800,mass,unpack_variant,0x0.1000,pickupsound,unpack_variant,0x0.2000,attacksound,unpack_variant,0x0.4000,hudcolor,unpack_variant,0x0.8000,deathsound,unpack_variant,0x1,meleerange,unpack_variant,0x2,maxtargetrange,unpack_variant,0x4,ammogive,unpack_variant,0x8,trailtype,unpack_actor_ref",",",1)
 
   -- actors functions
   local function_factory={
     -- A_FireBullets
     function()
-      local xspread,yspread,bullets,dmg,puff=unpack_fixed(),unpack_fixed(),mpeek(),mpeek(),unpack_actor_ref()
+      local xspread,yspread,bullets,dmg,puff=unpack_fixed(),unpack_fixed(),mpeek(),mpeek(),unpack_actor_ref(actors)
       return function(owner)
         -- find 'real' owner
         owner=owner.owner or owner
@@ -1540,7 +1519,7 @@ function unpack_actors()
     end,
     -- A_FireProjectile
     function()
-      local projectile=unpack_actor_ref()
+      local projectile=unpack_actor_ref(actors)
       return function(owner)
         -- find 'real' owner
         owner=owner.owner or owner
@@ -1656,7 +1635,7 @@ function unpack_actors()
     end,
     -- A_MeleeAttack
     function()
-      local dmg,puff=mpeek(),unpack_actor_ref()
+      local dmg,puff=mpeek(),unpack_actor_ref(actors)
       return function(owner)
         -- find 'real' owner
         owner=owner.owner or owner
@@ -1695,9 +1674,10 @@ function unpack_actors()
   -- float
   -- dropoff
   -- dontfall
-  local all_flags=split("0x1,is_solid,0x2,is_shootable,0x4,is_missile,0x8,is_monster,0x10,is_nogravity,0x20,is_float,0x40,is_dropoff,0x80,is_dontfall",",",1)
+  local all_flags=split("0x1,is_solid,0x2,is_shootable,0x4,is_missile,0x8,is_monster,0x10,is_nogravity,0x20,is_float,0x40,is_dropoff,0x80,is_dontfall,0x100,randomize",",",1)
   unpack_array(function()
-    local kind,id,flags,state_labels,states,weapons,active_slot,inventory=unpack_variant(),unpack_variant(),mpeek(),{},{},{}
+    local kind,id,flags,state_labels,states,weapons,active_slot,inventory=unpack_variant(),unpack_variant(),mpeek()|mpeek()<<8,{},{},{}
+    local randomize=flags&0x200!=0
 
     local item={
       id=id,
@@ -1708,7 +1688,7 @@ function unpack_actors()
       -- attach actor to this thing
       attach=function(self,thing)
         -- vm state (starts at spawn)
-        local i,ticks=state_labels[0],-2
+        local i,ticks,rnd_tick=state_labels[0],-2,randomize and rnd(4)\1 or 0
 
         -- extend properties
         thing=inherit({
@@ -1723,6 +1703,8 @@ function unpack_actors()
           -- goto vm label
           jump_to=function(self,label,fallback)
             i,ticks=state_labels[label] or (fallback and state_labels[fallback]),-2
+            -- randomize?
+            if(randomize and label==5) rnd_tick=rnd(4)\1
           end,
           -- vm update
           tick=function(self)
@@ -1741,7 +1723,8 @@ function unpack_actors()
               -- effective state
               self.state=state
               -- get ticks
-              ticks=state[1]
+              ticks=max(-1,state[1]-rnd_tick)
+              rnd_tick=0
               -- trigger function (if any)
               if(state.fn) state.fn(self)
             end
@@ -1762,10 +1745,17 @@ function unpack_actors()
     end
 
     local properties=unpack_fixed()
-    -- warning: update if adding new properties
-    properties_factory[19]={0x0.0400,"",function()
+    -- decode 
+    for i=1,#properties_factory,3 do
+      if properties_factory[i]&properties!=0 then
+        -- unpack
+        item[properties_factory[i+1]]=_ENV[properties_factory[i+2]](actors)
+      end
+    end
+    -- startitems (always packed at the end)
+    if properties&0x0.0400!=0 then
       unpack_array(function()
-        local startitem,amount=unpack_actor_ref(),unpack_variant()
+        local startitem,amount=unpack_actor_ref(actors),unpack_variant()
         if startitem.kind==2 then
           -- weapon
           weapons=weapons or {}
@@ -1781,16 +1771,8 @@ function unpack_actors()
           inventory[startitem]=amount
         end
       end)
-    end}
-
-    -- decode 
-    for _,props in ipairs(properties_factory) do
-      local mask,k,fn=unpack(props)
-      if mask&properties!=0 then
-        -- unpack
-        item[k]=(fn or unpack_variant)()
-      end
     end
+
     local function pickup(thing,owner,ref,qty,maxqty)
       ref,maxqty=ref or item,maxqty or item.maxamount
       -- only pick up if we're below max quantity
