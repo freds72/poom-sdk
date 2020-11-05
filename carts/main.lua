@@ -848,11 +848,8 @@ function with_physic(thing)
             end
           end
         end)
-              
-        -- apply move
-        v2_add(self,velocity)
 
-        -- trail?
+        -- trail? (at previous position)
         if actor.trailtype  then
           local puffthing=make_thing(actor.trailtype,self[1],self[2],0,self.angle)
           -- todo: get height from properties
@@ -860,6 +857,9 @@ function with_physic(thing)
           puffthing[3]=h
           add_thing(puffthing)
         end
+
+        -- apply move
+        v2_add(self,velocity)
 
         -- refresh sector after fixed collision
         ss=find_sub_sector(_bsp,self)
@@ -1677,7 +1677,7 @@ function unpack_actors()
   local all_flags=split("0x1,is_solid,0x2,is_shootable,0x4,is_missile,0x8,is_monster,0x10,is_nogravity,0x20,is_float,0x40,is_dropoff,0x80,is_dontfall,0x100,randomize",",",1)
   unpack_array(function()
     local kind,id,flags,state_labels,states,weapons,active_slot,inventory=unpack_variant(),unpack_variant(),mpeek()|mpeek()<<8,{},{},{}
-    local randomize=flags&0x200!=0
+    local randomize=flags&0x100!=0
 
     local item={
       id=id,
@@ -1703,7 +1703,7 @@ function unpack_actors()
           -- goto vm label
           jump_to=function(self,label,fallback)
             i,ticks=state_labels[label] or (fallback and state_labels[fallback]),-2
-            -- randomize?
+            -- randomize on death?
             if(randomize and label==5) rnd_tick=rnd(4)\1
           end,
           -- vm update
@@ -1723,7 +1723,8 @@ function unpack_actors()
               -- effective state
               self.state=state
               -- get ticks
-              ticks=max(-1,state[1]-rnd_tick)
+              ticks=state[1]
+              if(ticks!=-1) ticks=max(ticks-rnd_tick)
               rnd_tick=0
               -- trigger function (if any)
               if(state.fn) state.fn(self)
