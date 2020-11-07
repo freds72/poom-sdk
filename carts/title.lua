@@ -22,11 +22,11 @@ end
 function next_state(fn,...)
   local u,d,i=fn(...)
   -- ensure update/draw pair is consistent
-  _update60=function()
+  _update=function()
     -- init function (if any)
     if(i) i()
     -- 
-    _update60,_draw=u,d
+    _update,_draw=u,d
     -- actually run the update
     u()
   end
@@ -57,6 +57,9 @@ function start_state()
     end,
     -- init
     function()
+      -- reset any bitplane masking
+      poke(0x5f5e,0xff)
+
       unpack_gfx(title_gfx.bytes,13)
     end  
 end
@@ -138,7 +141,9 @@ function menu_state()
 
       -- menu items
       for i=1,#menus[menu_i][2] do
-        printb(menus[menu_i][2][i],28,72+i*9,i<=menus[menu_i].max and vcol(4) or vcol(3))
+        local s=menus[menu_i][2][i]
+        if(i>menus[menu_i].max) s=masked(s)
+        printb(s,28,72+i*9,i<=menus[menu_i].max and vcol(4) or vcol(3))
       end
       
       pal(title_gfx.pal,1)
@@ -170,7 +175,40 @@ function fadetoblack_state(...)
     end
 end
 
-function launch_state(skill,id)
+function stats_state(skill,id,level_time,kills,monsters,secrets,all_secrets)
+  local ttl,msg_ttl,max_msg=0,0,2
+  local msgs={
+    "completed:",
+    _maps_label[id],
+    "time: "..time_tostr(level_time),
+    "kills: "..kills.."/"..monsters,
+    all_secrets>0 and "secrets: "..secrets.."/"..all_secrets or nil
+  }
+
+  return
+    function()
+      if ttl>600 or btnp(4) or btnp(5) then
+        next_state(launch_state,skill,id+1)
+      end
+      ttl+=1
+      msg_ttl+=1
+      if msg_ttl>15 and max_msg<#msgs then
+        sfx(0)
+        max_msg+=1
+        msg_ttl=0
+      end
+    end,
+    function()   
+      local y=40   
+      for i=1,max_msg do
+        local s=msgs[i]
+        printb(s,63-#s*2,y,15)
+        y+=10
+      end
+    end
+end
+
+function launch_state(skill,id,level_time,kills,secrets)
   -- record max level reached so far
   if(id>dget(32)) dset(32,id)
   return
@@ -197,24 +235,53 @@ function launch_state(skill,id)
     end
 end
 
-function endgame_state(skill)
-  local ttl=9000
-  -- todo: music??
-  
+
+function credits_state()  
+  local ttl=0
   return
+    -- update
     function()
-      ttl-=1
-      if ttl<0 or btnp()!=0 then
+      if ttl>3000 or btnp(4) or btnp(5) then
         -- back to startup screen
-        next_state(fadetoblack_state,start_state)
+        next_state(start_state)
       end
+
+      ttl+=0.25
+    end,
+    -- draw
+    function()
+      -- doom fire!
+      -- credits: https://fabiensanglard.net/doom_fire_psx/index.html
+
+      -- draw 'fire plane'
+      poke(0x5f5e,0x77)
+      for x=0,127 do
+        for y=127,100,-1 do
+          local c=pget(x,y)
+          -- decay
+          pset((x+rnd(2)-1)&127,y-1,rnd()>0.5 and min(c+1,7) or c)
+        end
+      end
+      -- draw 'text plane'
+      poke(0x5f5e,0x88)      
+      rectfill(0,0,127,127,0)
+      local y=128-ttl
+      pal(1,8)
+      sspr(0,0,128,13,0,y,128,13)
+      pal()
+      y+=128
+      for i,t in ipairs(_credits) do
+        print(t,64-#t*2,y,8)
+        y+=7
+      end
+      pal({[0]=0,7,10,9,8,2,1,0,8,10,9,8,2,8,2,8},1)
     end,
     function()
       cls()
-      spr(0,0,0,16,16)
-      pal(endgame_gfx.pal,1)
-    end,
-    function()
+      pal()
+      -- seed
+      memset(0x7fc0,0x11,64)
+      -- 
       unpack_gfx(endgame_gfx.bytes)
     end
 end
@@ -263,7 +330,7 @@ function _init()
   end
 
   local p=split(stat(6))  
-  local skill,mapid,state=tonum(p[1]) or 2,tonum(p[2]) or 1,tonum(p[3]) or 0
+  local skill,mapid,state,level_time,kills,monsters,secrets=tonum(p[1]) or 2,tonum(p[2]) or 1,tonum(p[3]) or 0,tonum(p[4]) or 0,tonum(p[5]) or 0,tonum(p[6]) or 0,tonum(p[7]) or 0
   
   -- special case for end game state
   if(state==2 and mapid+1>#_maps_group) state=4
@@ -274,17 +341,17 @@ function _init()
     -- 1: game over
     {fadetoblack_state,start_state},
     -- 2: next level
-    {slicefade_state,launch_state,skill,mapid+1},
+    {slicefade_state,stats_state,skill,mapid,level_time,kills,monsters,secrets,_secrets[mapid]},
     -- 3: retry
     {slicefade_state,launch_state,skill,mapid},    
     -- 4: end game
-    {fadetoblack_state,endgame_state,skill+1}
+    {fadetoblack_state,credits_state}
   }
 
   -- wait time before launching (15 frames when loading from menu to prevent audio from getting cut too short)
   launch_ttl=(state==2 or state==3) and 1 or 15
 
-  next_state(unpack(states[state]))
+  next_state(unpack(states[state]))  
 end
 
 -->8
@@ -293,6 +360,25 @@ function printb(s,x,y,c,bgc)
   bgc=bgc or 0
   print(s,x,y+1,bgc)
   print(s,x,y,c)
+end
+
+function padding(n)
+	n=tostr(min(n,99)\1)
+	return sub("00",1,2-#n)..n
+end
+
+function masked(s)
+  local q=""
+  for i=1,#s do
+    local c=sub(s,i,i)
+    q=q..(c==" " and c or "?")
+  end
+  return q
+end
+
+-- frames per sec to human time (mm'ss''zzz')
+function time_tostr(t)
+	return padding((t\60)%60).."'"..padding(t%60).."''"..padding((t&0x0.ffff)*100)
 end
 
 function lerp(a,b,t)

@@ -5,8 +5,8 @@ local _ambientlight,_ammo_factor,_intersectid,_msg=0,1,0
 --local k_far,k_near=0,2
 --local k_right,k_left=4,8
 
--- copy color gradients (16*16 colors x 2) to memory
-memcpy(0x4300,0x0,512)
+-- copy color gradients (16*16 colors x 2) to memory + skybox image (if any)
+memcpy(0x4300,0x0,4096)
 
 -- create a new instance with parent properties
 function inherit(t,parent)
@@ -233,8 +233,17 @@ end
 -- floor/ceiling n-gon filling routine
 -- xoffset: used as texture offset
 -- yoffset: height
+-- if tex is 0: renders skybox gradient
 function polyfill(v,xoffset,yoffset,tex,light)
   poke4(0x5f38,tex)
+  local _tline,_memcpy=tline,memcpy
+  if tex==0 then
+    pal()
+    _memcpy,_tline=time,function(x0,y0,x1) 
+      if(y0>_sky_height) y0=_sky_height
+      rectfill(x0,y0,x1,y0,@(_sky_offset+y0))
+    end
+  end
 
   local v0,spans,ca,sa,cx,cy,cz,pal0=v[#v],{},_cam.u,_cam.v,(_plyr[1]>>4)+xoffset,(-_cam.m[4]-yoffset)<<3,_plyr[2]>>4
   local x0,w0=v0.x,v0.w
@@ -259,15 +268,15 @@ function polyfill(v,xoffset,yoffset,tex,light)
         if w0>0.15 then
           -- collect boundaries + color shitfint + mode 7
           local a,b,rz,pal1=x0,span,cy/(y-63.5),(light*min(15,w0<<5))\1
-          if(a>b) a=span+0 b=x0+0
+          if(a>b) a=span b=x0
           -- color shifing
-          if(pal0!=pal1) memcpy(0x5f00,0x4300|pal1<<4,16) pal0=pal1
+          if(pal0!=pal1) _memcpy(0x5f00,0x4300|pal1<<4,16) pal0=pal1
 
           -- mode7 texturing
           local rx=rz*(a\1-63.5)>>7
         
           -- camera space
-          tline(a,y,b,y,ca*rx+sa*rz+cx,ca*rz-sa*rx+cz,ca*rz>>7,-sa*rz>>7)   
+          _tline(a,y,b,y,ca*rx+sa*rz+cx,ca*rz-sa*rx+cz,ca*rz>>7,-sa*rz>>7)   
         end       
       else
         spans[y]=x0
@@ -276,10 +285,10 @@ function polyfill(v,xoffset,yoffset,tex,light)
       x0+=dx
       w0+=dw
     end		
-    x0=_x1+0
-    y0=_y1+0
-    w0=_w1+0
-  end
+    x0=_x1
+    y0=_y1
+    w0=_w1
+  end  
 end
 
 local function v_clip(v0,v1,t)
@@ -422,7 +431,7 @@ function draw_flats(v_cache,segs)
                   local ot=y0-otop*w0
                   tline(x,ct,x,ot,u,(ct-t)/w0+yoffsettop,0,1/w0)
                   -- new window top
-                  t=ot+0
+                  t=ot
                   ct=ot\1+1
                 end
                 -- bottom wall side between current sector and back sector     
@@ -432,7 +441,7 @@ function draw_flats(v_cache,segs)
                   local cob=ob\1+1
                   tline(x,cob,x,b,u,(cob-ob)/w0,0,1/w0)
                   -- new window bottom
-                  b=ob+0
+                  b=ob
                 end
         
                 -- middle wall?
@@ -452,9 +461,9 @@ function draw_flats(v_cache,segs)
           end
         end
         v0=v1
-        x0=_x1+0
-        y0=y1+0
-        w0=w1+0
+        x0=_x1
+        y0=y1
+        w0=w1
       end
       
       -- draw things (if any) in this convex space
@@ -894,6 +903,16 @@ function with_physic(thing)
       if not is_missile then
         local h,sector=self[3]+dz,self.sector
         if h<sector.floor then
+          -- found secret?
+          if is_player and sector.special==195 and not _found[sector] then
+            _found[sector]=true
+            _secrets+=1
+            _msg="found secret!"
+            do_async(function()
+              wait_async(30)
+              _msg=nil
+            end)
+          end
           -- not fall damage or sector damage for floating actors
           if not actor.is_float and actor.is_shootable then
             -- fall damage
@@ -951,6 +970,9 @@ function with_health(thing)
       end
       self.health=max(self.health-hp)\1
       if self.health==0 then
+        -- register kill
+        if(instigator==_plyr and self.actor.countkill) _kills+=1
+
         die(self,dmg)
       end
       -- kickback
@@ -1186,10 +1208,10 @@ function next_state(fn,...)
   end
 end
 
-_max_cpu,_max_cpu_ttl=0,0
+--_max_cpu,_max_cpu_ttl=0,0
 
 function play_state()
-  _btns,_wp_hud={}
+  _things,_btns,_wp_hud={},{}
   
   -- stop music (eg. restart game)
   music(-1)
@@ -1204,8 +1226,10 @@ function play_state()
   -- restore main data cart
   reload()
 
+  -- misc game counters
+  _kills,_monsters,_found,_secrets=0,0,{},0
+
   -- attach behaviors to things
-  _things={}
   for _,thingdef in pairs(thingdefs) do 
     local thing,actor=make_thing(unpack(thingdef))
     -- get direct access to player
@@ -1213,7 +1237,8 @@ function play_state()
       _plyr=attach_plyr(thing,actor,_skill)
       _plyr:load(_actors)
       thing=_plyr
-    end
+    end    
+    if(actor.countkill) _monsters+=1
     add_thing(thing)
   end
   -- todo: release actors
@@ -1226,6 +1251,9 @@ function play_state()
   return 
     -- update
     function()
+      -- must be done after load to not register unpacking time!
+      if(not _start_time) _start_time=time()
+
       if _plyr.dead then
         next_state(gameover_state,_plyr,_plyr.angle,_plyr.target,45)
       end
@@ -1239,6 +1267,7 @@ function play_state()
       if(_msg) print(_msg,64-#_msg*2,120,15)
 
       -- debug messages
+      --[[
       local cpu=stat(1)
       _max_cpu_ttl-=1
       if(_max_cpu_ttl<0) _max_cpu=0
@@ -1248,6 +1277,11 @@ function play_state()
     
       print(cpu,2,3,3)
       print(cpu,2,2,15)    
+      cpu=(time()-_start_time).."|".._kills.."/".._monsters
+    
+      print(cpu,2,3,3)
+      print(cpu,2,2,15)    
+      ]]
     end
 end
 
@@ -1303,6 +1337,11 @@ function _init()
   -- launch params
   local p=split(stat(6))
   _skill,_map_id=tonum(p[1]) or 2,tonum(p[2]) or 1
+  -- sky texture
+  local id=_map_id*2-2
+  _sky_height,_sky_offset=_maps_sky[id+1],_maps_sky[id+2]
+  -- skybox fill pattern
+  fillp(0xaaaa)
 
   next_state(play_state)
 end
@@ -1465,7 +1504,8 @@ function unpack_special(sectors,actors)
       -- save player's state
       _plyr:save()
 
-      load(mod_name.."_0.p8",nil,_skill..",".._map_id..",2")
+      -- record level completion time
+      load(mod_name.."_0.p8",nil,_skill..",".._map_id..",2,"..(time()-_start_time)..",".._kills..",".._monsters..",".._secrets)
     end
   end
 end
@@ -1674,10 +1714,9 @@ function unpack_actors()
   -- float
   -- dropoff
   -- dontfall
-  local all_flags=split("0x1,is_solid,0x2,is_shootable,0x4,is_missile,0x8,is_monster,0x10,is_nogravity,0x20,is_float,0x40,is_dropoff,0x80,is_dontfall,0x100,randomize",",",1)
+  local all_flags=split("0x1,is_solid,0x2,is_shootable,0x4,is_missile,0x8,is_monster,0x10,is_nogravity,0x20,is_float,0x40,is_dropoff,0x80,is_dontfall,0x100,randomize,0x200,countkill",",",1)
   unpack_array(function()
     local kind,id,flags,state_labels,states,weapons,active_slot,inventory=unpack_variant(),unpack_variant(),mpeek()|mpeek()<<8,{},{},{}
-    local randomize=flags&0x100!=0
 
     local item={
       id=id,
@@ -1688,7 +1727,7 @@ function unpack_actors()
       -- attach actor to this thing
       attach=function(self,thing)
         -- vm state (starts at spawn)
-        local i,ticks,rnd_tick=state_labels[0],-2,randomize and rnd(4)\1 or 0
+        local i,ticks=state_labels[0],-2
 
         -- extend properties
         thing=inherit({
@@ -1703,8 +1742,6 @@ function unpack_actors()
           -- goto vm label
           jump_to=function(self,label,fallback)
             i,ticks=state_labels[label] or (fallback and state_labels[fallback]),-2
-            -- randomize on death?
-            if(randomize and label==5) rnd_tick=rnd(4)\1
           end,
           -- vm update
           tick=function(self)
@@ -1724,8 +1761,6 @@ function unpack_actors()
               self.state=state
               -- get ticks
               ticks=state[1]
-              if(ticks!=-1) ticks=max(ticks-rnd_tick)
-              rnd_tick=0
               -- trigger function (if any)
               if(state.fn) state.fn(self)
             end
