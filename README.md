@@ -54,13 +54,14 @@ ZDoom Wiki (outstanding content folks!)
     optional arguments:
       -h, --help            show this help message and exit
       --pico-home PICO_HOME
-                            full path to PICO8 folder
+                            Full path to PICO8 folder
       --carts-path CARTS_PATH
-                            path to carts folder where game is exported
-      --mod-name MOD_NAME   game cart name (ex: poom)
-      --map MAP             map name to compile (ex: E1M1)
+                            Path to carts folder where game is exported
+      --mod-name MOD_NAME   Game cart name (ex: poom)
+      --map MAP             Map name to compile (ex: E1M1)
       --compress            Enable compression (default: false)
       --release RELEASE     Generate packages (bin+html) with given version
+      --sky SKY             Skybox texture name
       ```
 
 ## Compile & Run Poom
@@ -191,6 +192,7 @@ The following sector "special" behaviors are supported:
 | 80 | 20 Damage | 20 HP every 15 ticks |
 | 84 | 5 Damage + Scroll East | 5 HP every 15 ticks + floor texture scrolling |
 | 115 | Instadeath | Kills any actor touching sector floor |
+| 195 | Hidden | Defines a secret sector. Will display "secret found" message first time player enters sector |
 
 ## Line Specials
 
@@ -212,18 +214,26 @@ The following triggers are supported:
 # Graphics
 
 ## Flats
-All wall & floors textures (aka "flats") must be stored as single image. The tileset can be up to 1024x128 pixels.
+All wall & floors textures (aka "flats") must be stored as single image. The tileset can be up to 1024x256 pixels. This is plenty of room to compose many diverse panels.
 
 The toolkit automatically converts tileset into unique 8x8 tiles. 
-> The tileset cannot contain more than 127 unique tiles.
+> The tileset cannot contain more than 128 unique tiles.
 
 Example tileset:
 
 ![Tileset](graphics/TILES.png)
 
-Resulting PICO8 tiles:
+"None" texture ("-") for ceiling & floors will be displayed using a skybox gradient (or pure black if none).
 
-![In Game Tiles](docs/tiles.png)
+A skybox gradient must be a 2 pixel wide image (up to 128 pixel width).
+
+Example: 
+
+![Tileset](graphics/SKYBOX.png)
+
+In-game result:
+
+![Tileset](docs/skybox.gif)
 
 ### Creating New Textures
 
@@ -305,13 +315,20 @@ The ZMAPINFO file contains the list of map metadata (name, music...).
 The file syntax is:
 ```
 map <maplump> <nice name> { properties }
+gameinfo { properties }
 ```
-where supported properties are:
+where supported *map* properties are:
 | property | Type | Description |
 |----------|:----:|:-----------:|
 |levelnum  | integer | level sequence. Only required to mark first level |
 |next | string | lump name of next level. Use ```"endgame"``` to move to game over screen|
 |music | integer | (optional) background music identifier. See [Music & Sound]() section |
+|sky1 | string | skybox gradient image name. Required if level has "none" ceiling textures. |
+
+where supported *gameinfo* properties are:
+| property | Type | Description |
+|----------|:----:|:-----------:|
+|credits  | string | Comma-separated credits, displayed on end game screen. |
 
 Example:
 ```C
@@ -328,8 +345,16 @@ map E1M2 "Docks"
 	levelnum = 2
 	next = "endgame"
 	music = 12
+  // references a graphics/SKY.png file
+  sky1 = "SKY"
+}
+
+gameinfo {
+  // pico8 casing is "reversed"
+  credits = "cONTRIBUTORS:,jOE,bOB,lOUISE,..."
 }
 ```
+
 
 # Monsters & Props
 
@@ -486,9 +511,6 @@ Default is 20.
 Using very small values can provoke glitches in collision detection.
 The total diameter is double this value, so an actor with a radius of 64 is actually 128 units in length and width, making it impossible for them to navigate through a corridor that's 128 units wide, for example.
 
-### Weapon.SlotNumber _value_
-Default slot for this weapon. 
-
 ### Inventory.Amount _value_
 Sets the amount of inventory items given by this item. Mostly used for item types that give larger quantities.
 
@@ -506,8 +528,10 @@ Defines how fast an actor moves. For projectiles this is the distance it moves p
 
 Default is 0.
 
-### Weapon.AmmoGive _amount_
+### Weapon.SlotNumber _value_
+Default slot for this weapon. Must be between 1-5.
 
+### Weapon.AmmoGive _amount_
 The amount of primary ammo you receive from this weapon.
 
 ### Weapon.AmmoUse _amount_
@@ -554,6 +578,9 @@ The type of primary ammo the weapon uses. This must be a valid ammo type.
 Adds an item to player's start inventory. First weapon added is the weapon selected at start.
 
 > The initial startitem list is never inherited and must be specified in full for each player class.
+
+### TrailType _classname_
+Specifies the actor _classname_ to spawn at last thing position every frame. Example use: rocket trail.
 
 ## Actor Flags
 
@@ -604,6 +631,11 @@ Actor is a projectile. Actors with this flag set will enter their death state wh
 Actors with this flag will also be able to go through impassable linedefs.
 
 > Automatically given by the Projectile class
+
+### COUNTKILL
+Counts toward kill percentage.
+
+> Automatically given by the Monster class
 
 ## Actor states
 
