@@ -62,6 +62,7 @@ ZDoom Wiki (outstanding content folks!)
       --compress            Enable compression (default: false)
       --release RELEASE     Generate packages (bin+html) with given version
       --sky SKY             Skybox texture name
+      --dump-sprites        Writes all sprites to a single image with their 16x16 tile overlay.
       ```
 
 ## Compile & Run Poom
