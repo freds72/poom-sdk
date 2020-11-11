@@ -1,6 +1,6 @@
 -- globals
 local _onoff_textures,_transparent_textures,_bsp,_cam,_plyr,_things,_sprite_cache,_actors,_btns,_wp_hud={[0]=0},{}
-local _ambientlight,_ammo_factor,_intersectid,_msg=0,1,0
+local _slow,_ambientlight,_ammo_factor,_intersectid,_msg=0,0,1,0
 
 --local k_far,k_near=0,2
 --local k_right,k_left=4,8
@@ -272,7 +272,9 @@ function polyfill(v,xoffset,yoffset,tex,light)
         -- limit visibility
         if w0>0.15 then
           -- collect boundaries + color shitfint + mode 7
-          local a,b,rz,pal1=x0,span,cy/(y-63.5),(light*min(15,w0<<5))\1
+          local wlight=w0<<5
+          if(wlight>15) wlight=15
+          local a,b,rz,pal1=x0,span,cy/(y-63.5),(light*wlight)\1
           if(a>b) a=span b=x0
           -- color shifing
           if(pal0!=pal1) _memcpy(0x5f00,0x4300|pal1<<4,16) pal0=pal1
@@ -385,12 +387,12 @@ function draw_flats(v_cache,segs)
         -- logical split or wall?
         -- front facing?
         if x0<x1 and ldef then
-          -- dual?
-          local facingside,otherside,otop,obottom=ldef[seg.side],ldef[not seg.side]
           -- peg bottom?
-          local yoffset,yoffsettop,_,toptex,midtex,bottomtex=bottom-top,bottom-top,unpack(facingside)
+          local _,toptex,midtex,bottomtex=unpack(ldef[seg.side])
           -- no need to draw untextured walls
           if toptex|midtex|bottomtex!=0 then
+            -- get other side (if any)
+            local yoffset,yoffsettop,otherside,otop,obottom=bottom-top,bottom-top,ldef[not seg.side]
             -- fix animated side walls (elevators)
             if ldef.flags&0x4!=0 then
               yoffset=0
@@ -425,7 +427,9 @@ function draw_flats(v_cache,segs)
             for x=cx0,x1\1 do
               if w0>2.4 then
                 -- top/bottom+perspective correct texture u+color shifing
-                local t,b,u,pal1=y0-top*w0,y0-bottom*w0,u0/(w0>>4),(light*min(15,w0<<1))\1
+                local wlight=w0<<1
+                if(wlight>15) wlight=15
+                local t,b,u,pal1=y0-top*w0,y0-bottom*w0,u0/(w0>>4),(light*wlight)\1
                 if(pal0!=pal1) memcpy(0x5f00,0x4300|pal1<<4,16) pal0=pal1
     
                 -- top wall side between current sector and back sector
@@ -1023,7 +1027,10 @@ function attach_plyr(thing,actor,skill)
         local dx,dz=0,0
 
         if _wp_hud then
-          _wp_hud=not (btn(6) or btn(6,1))
+          -- slow mode: pico calls _update 2 times
+          -- but button state is updated only on first frame
+          -- skip button state check in this case (e.g. keep hud open)
+          if(_slow==0) _wp_hud=not (btn(6) or btn(6,1))
           for i,k in pairs{0,3,1,2,4} do
             if btnp(k) or btnp(k,1) then
               -- only switch if we have the weapon and it's not the current weapon
@@ -1260,6 +1267,7 @@ function play_state()
     end,
     -- draw
     function()
+      _slow=0
       draw_bsp()
       _plyr:hud()
 
@@ -1375,7 +1383,7 @@ function _update()
   end
 
   _update_state()
-
+  _slow+=1
 end
 
 -->8
@@ -1596,7 +1604,7 @@ function unpack_actors()
       return function(thing)
         -- todo: optimize lookup!!!
         for _,otherthing in pairs(_things) do
-          if otherthing!=thing and otherthing.hit then
+          if otherthing.hit and otherthing!=thing then
             local n,d=line_of_sight(thing,otherthing,maxrange)
             if(d) otherthing:hit(dmg*(1-d/maxrange),n)
           end
@@ -1617,11 +1625,12 @@ function unpack_actors()
     -- A_Look
     function()
       return function(self)
-        for ptgt in all{self.target,_plyr} do
-          if(ptgt and not ptgt.dead) otherthing=ptgt break
-        end
+        -- either we got something already or player
+        local otherthing=self.target or _plyr
+        -- if this is dead, try player
+        if(otherthing.dead) otherthing=_plyr
         -- nothing to do?
-        if(not otherthing) self.target=nil return
+        if(otherthing.dead) self.target=nil return
         -- in range/visible?
         local n,d=line_of_sight(self,otherthing,1024)
         if d then
@@ -1633,7 +1642,7 @@ function unpack_actors()
     end,
     -- A_Chase
     function(item)
-      local speed,range,maxrange=item.speed,item.meleerange or 64,item.maxtargetrange or 1024 
+      local speed,range,maxrange,ttl=item.speed,item.meleerange or 64,item.maxtargetrange or 1024,30
       return function(self)
         -- still active target?
         local otherthing=self.target
@@ -1641,6 +1650,9 @@ function unpack_actors()
           -- in range/visible?
           local n,d=line_of_sight(self,otherthing,maxrange)
           if d and rnd()<0.4 then
+            -- i see you!
+            -- note: ttl is in 'decorate' unit (not frames)
+            ttl=30
             if d<range then
               -- close range attack (if any)
               self:jump_to(3,4)
@@ -1648,15 +1660,17 @@ function unpack_actors()
               -- ranged attack
               self:jump_to(4)
             end
-          else
+            return
+          elseif ttl>0 then
+            ttl-=1
             -- zigzag toward target
             local nx,ny,dir=n[1]*0.5,n[2]*0.5,rnd{1,-1}
             local mx,my=ny*dir+nx,nx*-dir+ny
             local target_angle=atan2(mx,-my)
             self.angle=lerp(shortest_angle(target_angle,self.angle),target_angle,0.5)
             self:apply_forces(mx,my,speed)
+            return
           end
-          return
         end
         -- lost/dead?
         self.target=nil
