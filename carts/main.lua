@@ -319,7 +319,7 @@ end
 
 -- ceil/floor/wall rendering
 function draw_flats(v_cache,segs)
-  local verts,outcode,nearclip,m1,m3,m4,m8,m9,m11,m12={},0xffff,0,unpack(_cam.m)
+  local verts,outcode,nearclip,px,py,m1,m3,m4,m8,m9,m11,m12={},0xffff,0,_plyr[1],_plyr[2],unpack(_cam.m)
   
   -- to cam space + clipping flags
   for i,seg in ipairs(segs) do
@@ -534,10 +534,10 @@ function draw_flats(v_cache,segs)
         local side,_,flipx,bright,sides=0,unpack(frame)
         -- use frame brightness level
         local pal1=bright and 8 or (light*min(15,w0<<5))\1
-        if(pal0!=pal1) memcpy(0x5f00,0x4300|min(pal1,15)<<4,16) pal0=pal1            
+        if(pal0!=pal1) memcpy(0x5f00,0x4300|pal1<<4,16) pal0=pal1            
         -- pick side (if any)
         if sides>1 then
-          local angle=((atan2(_plyr[1]-thing[1],thing[2]-_plyr[2])-thing.angle+0.0625)%1+1)%1
+          local angle=((atan2(px-thing[1],thing[2]-py)-thing.angle+0.0625)%1+1)%1
           side=(sides*angle)\1
           -- get flip bit from mask
           flipx=flipx&(1<<side)!=0
@@ -791,8 +791,8 @@ function with_physic(thing)
     update=function(self)
       -- integrate forces
       v2_add(velocity,forces)
-      -- floating actor?
-      if actor.is_float and self.target then
+      -- alive floating actor? : track target height
+      if not self.dead and actor.is_float and self.target then
         dz+=mid((self.target[3]-self[3])>>4,-2,2)
         -- avoid woobling
         dz*=friction
