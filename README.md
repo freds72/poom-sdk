@@ -633,6 +633,9 @@ Actors with this flag will also be able to go through impassable linedefs.
 
 > Automatically given by the Projectile class
 
+### RANDOMIZE
+Adds 0-3 tics on first actor's state tick duration. Useful to randomize special effects (puff) or ensure animated sprites are not all in sync.
+
 ### COUNTKILL
 Counts toward kill percentage.
 
