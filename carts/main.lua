@@ -574,7 +574,7 @@ end
 
 function register_thing_subs(node,thing,radius)
   -- leaf?
-  if node.pvs then
+  if node.in_pvs then
     -- thing -> sector
     thing.subs[node]=true
     -- reverse
@@ -706,8 +706,8 @@ end
 -- returns distance and normal to target (if visible)
 function line_of_sight(thing,otherthing,maxdist)
   -- pvs check
-  local id,n,d=otherthing.ssector.id,v2_normal(v2_make(thing,otherthing))
-  if(band(thing.ssector.pvs[id\32],0x0.0001<<(id&31))==0) return n
+  local n,d=v2_normal(v2_make(thing,otherthing))
+  if(not thing.ssector:in_pvs(otherthing.ssector.id)) return n
 
   -- in radius?
   d=max(d-thing.actor.radius)
@@ -793,7 +793,7 @@ function with_physic(thing)
       v2_add(velocity,forces)
       -- alive floating actor? : track target height
       if not self.dead and actor.is_float and self.target then
-        dz+=mid((self.target[3]-self[3])>>4,-2,2)
+        dz+=mid((self.target[3]-self[3])>>4,-2,2)+rnd()
         -- avoid woobling
         dz*=friction
       end
@@ -839,7 +839,7 @@ function with_physic(thing)
               v2_add(self,move_dir,fix_move.ti)
               velocity={0,0}
               -- explosion sound (if any)
-              if(actor.deathsound) sfx(actor.deathsound)
+              if(actor.deathsound and ss:in_pvs(_plyr.ssector.id)) sfx(actor.deathsound)
               -- death state
               self:jump_to(5)
               -- hit thing
@@ -1181,16 +1181,13 @@ function draw_bsp()
   cls()
   --
   -- draw bsp & visible things
-  local pvs,v_cache=_plyr.ssector.pvs,{}
+  local id,v_cache=_plyr.ssector.id,{}
 
   -- visit bsp
   visit_bsp(_bsp,_plyr,function(node,side,pos,visitor)
     if node.leaf[side] then
       local subs=node[side]
-      -- potentially visible?
-      local id=subs.id
-      -- use band to support gaps (nil) in pvs hashmap
-      if band(pvs[id\32],0x0.0001<<(id&31))!=0 then
+      if subs:in_pvs(id) then
         draw_flats(v_cache,subs)
       end
     elseif _cam:is_visible(node.bbox[side]) then
@@ -1561,8 +1558,9 @@ function unpack_actors()
     -- A_PlaySound
     function()
       local s=mpeek()
-      return function()
-        sfx(s)
+      return function(self)
+        -- play sound only if visible from player
+        if(self.ssector:in_pvs(_plyr.ssector.id)) sfx(s)
       end
     end,
     -- A_FireProjectile
@@ -2021,8 +2019,12 @@ function unpack_map(skill,actors)
 
     -- convex sub-sectors
     unpack_array(function(i)
-      -- register current sub-sector in pvs
-      local segs={id=i,pvs={}}
+      local pvs={}
+      local segs={
+        id=i,
+        in_pvs=function(self,id)
+          return band(pvs[id\32],0x0.0001<<(id&31))!=0
+        end}
       unpack_array(function()
         local v,flags=verts[unpack_variant()],mpeek()
         local s=add(segs,{
@@ -2045,8 +2047,7 @@ function unpack_map(skill,actors)
       -- pvs (packed as a bit array)
       unpack_array(function()
         local id=unpack_variant()
-        local mask=segs.pvs[id\32] or 0
-        segs.pvs[id\32]=mask|0x0.0001<<(id&31)
+        pvs[id\32]=bor(pvs[id\32],0x0.0001<<(id&31))
       end)
       -- normals
       local s0=segs[#segs]
@@ -2085,14 +2086,13 @@ function unpack_map(skill,actors)
 
   -- bsp nodes
   unpack_array(function()
-    local node=add(nodes,{
+    local node,flags=add(nodes,{
       -- normal packed in struct to save memory
       unpack_fixed(),unpack_fixed(),
       -- distance to plane
       unpack_fixed(),
       leaf={}
-    })
-    local flags=mpeek()
+    }),mpeek()
     local function unpack_node(side,leaf)
       if leaf then
         node.leaf[side]=true
