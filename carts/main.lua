@@ -1739,7 +1739,8 @@ function unpack_actors()
       -- attach actor to this thing
       attach=function(self,thing)
         -- vm state (starts at spawn)
-        local i,ticks,delay=state_labels[0],-2,flags&0x8!=0 and rnd(30)\1 or 0
+        local i,ticks,delay=state_labels[0],-2,self.is_monster and rnd(30)\1 or 0
+        if(self.randomize) delay=rnd(4)\1
 
         -- extend properties
         thing=inherit({
