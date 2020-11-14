@@ -25,16 +25,13 @@ function decompress(cart,cart_id,mem,fn,...)
 	end
 	local function getn(n)
 		local r=0
-    for i=1,min(16,n) do
+    for i=1,n do
 			r=get1()|r<<1
-		end
-		if n>16 then
-			r|=getn(n-16)>>>16
 		end
     return r
 	end
-	
-	local o,l,m,e=getn(4),getn(4),getn(2),getn(32)
+	-- discard total len (32bits)
+	local o,l,m=getn(4),getn(4),getn(2),getn(16),getn(16)
 	local max_offset=1<<o
 	local function push(b)
 		add(dst,add(history,b))	

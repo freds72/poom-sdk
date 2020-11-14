@@ -1,6 +1,5 @@
 -- globals
-local _onoff_textures,_transparent_textures,_bsp,_cam,_plyr,_things,_sprite_cache,_actors,_btns,_wp_hud={[0]=0},{}
-local _slow,_ambientlight,_ammo_factor,_intersectid,_msg=0,0,1,0
+local _slow,_ambientlight,_ammo_factor,_intersectid,_onoff_textures,_transparent_textures,_bsp,_cam,_plyr,_things,_sprite_cache,_actors,_btns,_wp_hud,_msg=0,0,1,0,{[0]=0},{}
 
 --local k_far,k_near=0,2
 --local k_right,k_left=4,8
@@ -607,13 +606,12 @@ function intersect_sub_sector(segs,p,d,tmin,tmax,radius,intersect_cb,skipthings)
   if not skipthings then
     local hits={}
     for thing,_ in pairs(segs.things) do
-      local actor=thing.actor
       -- not already "hit"
       -- not a missile
       -- not dead
-      if thing.intersectid!=intersectid and not actor.is_missile and not thing.dead then
+      if thing.intersectid!=intersectid and not thing.dead and not thing.actor.is_missile then
         -- overflow 'safe' coordinates
-        local m,r={(px-thing[1])>>8,(py-thing[2])>>8},(actor.radius+radius)>>8
+        local m,r={(px-thing[1])>>8,(py-thing[2])>>8},(thing.actor.radius+radius)>>8
         local b,c=v2_dot(m,d),v2_dot(m,m)-r*r
 
         -- check distance and ray direction vs. circle
@@ -675,6 +673,7 @@ end
 
 -- scan attack (e.g. will hit anything in range)
 function hitscan_attack(owner,angle,range,dmg,puff)
+  -- todo: get height from properties
   local h,move_dir=owner[3]+32,{cos(angle),-sin(angle)}
   _intersectid+=1
   intersect_sub_sector(owner.ssector,owner,move_dir,owner.actor.radius/2,range,0,function(hit)    
@@ -689,7 +688,6 @@ function hitscan_attack(owner,angle,range,dmg,puff)
       -- actual hit position
       local pos={owner[1],owner[2]}
       v2_add(pos,move_dir,fix_move.ti)
-      -- todo: get height from properties
       add_thing(make_thing(puff,pos[1],pos[2],h,angle))
 
       -- hit thing
@@ -783,8 +781,9 @@ function with_physic(thing)
   return inherit({
     apply_forces=function(self,x,y,mag)
       -- todo: review arbitrary factor...
-      forces[1]+=64*mag*x/mass
-      forces[2]+=64*mag*y/mass
+      mag<<=6
+      forces[1]+=mag*x/mass
+      forces[2]+=mag*y/mass
     end,
     update=function(self)
       -- integrate forces
@@ -1507,7 +1506,7 @@ function unpack_special(sectors,actors)
       -- save player's state
       _plyr:save()
 
-      -- record level completion time
+      -- record level completion time + send stats
       load(mod_name.."_0.p8",nil,_skill..",".._map_id..",2,"..(time()-_start_time)..",".._kills..",".._monsters..",".._secrets)
     end
   end
