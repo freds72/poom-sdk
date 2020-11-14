@@ -651,11 +651,7 @@ function intersect_sub_sector(segs,p,d,tmin,tmax,radius,intersect_cb,skipthings)
     if denom>0 then
       local t=dist_a/denom
       -- within seg?
-      local pt={
-        px+t*dx,
-        py+t*dy
-      }
-      local d=v2_dot({s0[2],s0[3]},pt)-s0[4]
+      local d=s0[2]*(px+t*dx)+s0[3]*(py+t*dy)-s0[4]
       -- extended segment
       if d>=-radius and d<s0[5]+radius then
         local dist_b,inseg=s0[8]-v2_dot(n,{px+_tmax*dx,py+_tmax*dy}),d>=0 and d<s0[5]
@@ -714,6 +710,8 @@ function line_of_sight(thing,otherthing,maxdist)
   if d<maxdist then
     -- line of sight?
     local h=thing[3]+24
+    -- artificially level floating actors to their target
+    if(thing.actor.floating) h=otherthing[3]+24
     _intersectid+=1
     intersect_sub_sector(thing.ssector,thing,n,0,d,0,function(hit)
       -- cannot see
@@ -792,8 +790,8 @@ function with_physic(thing)
       -- integrate forces
       v2_add(velocity,forces)
       -- alive floating actor? : track target height
-      if not self.dead and actor.is_float and self.target then
-        dz+=mid((self.target[3]-self[3])>>4,-2,2)+rnd()
+      if not self.dead and actor.floating and self.target then
+        dz+=mid((self.target[3]+rnd(16)-self[3])>>8,-2,2)
         -- avoid woobling
         dz*=friction
       end
@@ -916,7 +914,7 @@ function with_physic(thing)
             end)
           end
           -- not fall damage or sector damage for floating actors
-          if not actor.is_float and actor.is_shootable then
+          if not actor.floating and actor.is_shootable then
             -- fall damage
             -- see: https://zdoom.org/wiki/Falling_damage
             local dmg=(((dz*dz)>>7)*11-30)\2
@@ -1724,7 +1722,7 @@ function unpack_actors()
   -- float
   -- dropoff
   -- dontfall
-  local all_flags=split("0x1,is_solid,0x2,is_shootable,0x4,is_missile,0x8,is_monster,0x10,is_nogravity,0x20,is_float,0x40,is_dropoff,0x80,is_dontfall,0x100,randomize,0x200,countkill",",",1)
+  local all_flags=split("0x1,is_solid,0x2,is_shootable,0x4,is_missile,0x8,is_monster,0x10,is_nogravity,0x20,floating,0x40,is_dropoff,0x80,is_dontfall,0x100,randomize,0x200,countkill",",",1)
   unpack_array(function()
     local kind,id,flags,state_labels,states,weapons,active_slot,inventory=unpack_variant(),unpack_variant(),mpeek()|mpeek()<<8,{},{},{}
 
