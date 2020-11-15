@@ -707,13 +707,13 @@ function line_of_sight(thing,otherthing,maxdist)
   d=max(d-thing.actor.radius)
   if d<maxdist then
     -- line of sight?
-    local h=thing[3]+24
+    local h=thing[3]
     -- artificially level floating actors to their target
-    if(thing.actor.floating) h=otherthing[3]+24
+    if(thing.actor.floating) h=otherthing[3]
     _intersectid+=1
     intersect_sub_sector(thing.ssector,thing,n,0,d,0,function(hit)
       -- cannot see
-      if(intersect_line(hit.seg,h,0,0,true,true)) d=nil return true
+      if(intersect_line(hit.seg,h+24,0,0,true,true)) d=nil return true
     end,true)
     -- normal and distance to hit
     return n,d
@@ -790,7 +790,7 @@ function with_physic(thing)
       v2_add(velocity,forces)
       -- alive floating actor? : track target height
       if not self.dead and actor.floating and self.target then
-        dz+=mid((self.target[3]+rnd(16)-self[3])>>8,-2,2)
+        dz+=mid((self.target[3]-self[3])>>8,-2,2)-rnd()+0.5
         -- avoid woobling
         dz*=friction
       end
@@ -885,7 +885,7 @@ function with_physic(thing)
       -- triggers?
       -- check triggers/bumps/...
       if is_player then
-        intersect_sub_sector(ss,self,{cos(self.angle),-sin(self.angle)},0,radius+24,0,function(hit)
+        intersect_sub_sector(ss,self,{cos(self.angle),-sin(self.angle)},0,radius+48,0,function(hit)
           local ldef=hit.seg.line
           -- buttons
           if ldef.trigger and ldef.flags&0x8>0 then
@@ -904,9 +904,8 @@ function with_physic(thing)
         if h<sector.floor then
           -- found secret?
           if is_player and sector.special==195 and not _found[sector] then
-            _found[sector]=true
+            _found[sector],_msg=true,"found secret!"
             _secrets+=1
-            _msg="found secret!"
             do_async(function()
               wait_async(30)
               _msg=nil
@@ -1340,8 +1339,7 @@ function _init()
   local p=split(stat(6))
   _skill,_map_id=tonum(p[1]) or 2,tonum(p[2]) or 1
   -- sky texture
-  local id=_map_id*2-2
-  _sky_height,_sky_offset=_maps_sky[id+1],_maps_sky[id+2]
+  _sky_height,_sky_offset=_maps_sky[_map_id*2-1],_maps_sky[_map_id*2]
   -- skybox fill pattern
   fillp(0xaaaa)
 
@@ -1547,8 +1545,7 @@ function unpack_actors()
         -- find 'real' owner
         owner=owner.owner or owner
         for i=1,bullets do
-          local angle=owner.angle+(rnd(2*xspread)-xspread)/360
-          hitscan_attack(owner,angle,1024,dmg,puff)
+          hitscan_attack(owner,owner.angle+(rnd(2*xspread)-xspread)/360,1024,dmg,puff)
         end
       end
     end,
