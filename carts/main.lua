@@ -790,7 +790,7 @@ function with_physic(thing)
       v2_add(velocity,forces)
       -- alive floating actor? : track target height
       if not self.dead and actor.floating then
-        dz+=rnd(1.8)-0.9
+        dz+=rnd(1.6)-0.9
         if(self.target) dz+=mid((self.target[3]-self[3])>>8,-2,2)
         -- avoid woobling
         dz*=friction
@@ -912,7 +912,7 @@ function with_physic(thing)
             end)
           end
           -- not fall damage or sector damage for floating actors
-          if not actor.floating and actor.is_shootable then
+          if not (actor.floating or actor.nosectordmg) and actor.is_shootable then
             -- fall damage
             -- see: https://zdoom.org/wiki/Falling_damage
             local dmg=(((dz*dz)>>7)*11-30)\2
@@ -1020,7 +1020,7 @@ function attach_plyr(thing,actor,skill)
       if not self.dead then
         wp_y=lerp(wp_y,wp_yoffset,0.3)
 
-        local dx,dz=0,0
+        local dx,dz,daf=0,0,0.8
 
         if _wp_hud then
           -- slow mode: pico calls _update 2 times
@@ -1041,12 +1041,15 @@ function attach_plyr(thing,actor,skill)
           if btn(🅾️) then
             if(_btns[0]) dx=1
             if(_btns[1]) dx=-1
+          -- direct mouse input?
+          elseif peek(0x5f80)==1 then
+            da+=(128-peek(0x5f81))/8
+            daf=0.2
+            poke(0x5f80,0)
           else
             if(_btns[0]) da-=0.75
             if(_btns[1]) da+=0.75
           end
-          -- direct mouse input?
-          da+=peek(0x5f80)*(128-peek(0x5f81))/24
 
           if(_btns[2]) dz=1
           if(_btns[3]) dz=-1
@@ -1067,7 +1070,7 @@ function attach_plyr(thing,actor,skill)
 
         -- damping
         -- todo: move to physic code?
-        da*=0.8
+        da*=daf
 
         -- update weapon vm
         wp[wp_slot].owner=self
@@ -1145,8 +1148,7 @@ function attach_plyr(thing,actor,skill)
     -- restore state
     load=function(self,actors)
       if dget(0)>0 then
-        self.health=dget(1)
-        self.armor=dget(2)
+        self.health,self.armor=dget(1),dget(2)
         for i=1,5 do
           local actor=actors[dget(i+2)]
           if actor then
@@ -1285,7 +1287,7 @@ function play_state()
     
       print(cpu,2,3,3)
       print(cpu,2,2,15)    
-      ]]      
+      ]]     
     end
 end
 
@@ -1715,7 +1717,7 @@ function unpack_actors()
   -- float
   -- dropoff
   -- dontfall
-  local all_flags=split("0x1,is_solid,0x2,is_shootable,0x4,is_missile,0x8,is_monster,0x10,is_nogravity,0x20,floating,0x40,is_dropoff,0x80,is_dontfall,0x100,randomize,0x200,countkill",",",1)
+  local all_flags=split("0x1,is_solid,0x2,is_shootable,0x4,is_missile,0x8,is_monster,0x10,is_nogravity,0x20,floating,0x40,is_dropoff,0x80,is_dontfall,0x100,randomize,0x200,countkill,0x400,nosectordmg",",",1)
   unpack_array(function()
     local kind,id,flags,state_labels,states,weapons,active_slot,inventory=unpack_variant(),unpack_variant(),mpeek()|mpeek()<<8,{},{},{}
 

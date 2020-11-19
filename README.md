@@ -641,6 +641,10 @@ Counts toward kill percentage.
 
 > Automatically given by the Monster class
 
+### NOSECTORDMG
+
+Ignores sector damage (except insta-kill sectors).
+
 ## Actor states
 
 An actor's states can be defined within its DECORATE definition. State sequences describe all the behavior of the actor as well as its animation.
