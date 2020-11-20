@@ -645,6 +645,10 @@ Counts toward kill percentage.
 
 Ignores sector damage (except insta-kill sectors).
 
+### NOBLOOD
+
+Actor does not bleed when hurt.
+
 ## Actor states
 
 An actor's states can be defined within its DECORATE definition. State sequences describe all the behavior of the actor as well as its animation.

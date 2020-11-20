@@ -30,8 +30,7 @@ function decompress(cart,cart_id,mem,fn,...)
 		end
     return r
 	end
-	-- discard total len (32bits)
-	local o,l,m=getn(4),getn(4),getn(2),getn(16),getn(16)
+	local o,l,m=getn(4),getn(4),getn(2)
 	local max_offset=1<<o
 	local function push(b)
 		add(dst,add(history,b))	

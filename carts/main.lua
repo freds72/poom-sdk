@@ -393,7 +393,7 @@ function draw_flats(v_cache,segs)
             -- get other side (if any)
             local yoffset,yoffsettop,otherside,otop,obottom=bottom-top,bottom-top,ldef[not seg.side]
             -- fix animated side walls (elevators)
-            if ldef.flags&0x4!=0 then
+            if ldef.dontpegtop then
               yoffset=0
             end
             if otherside then
@@ -402,7 +402,7 @@ function draw_flats(v_cache,segs)
               obottom=otherside[1].floor>>4
               -- offset animated walls (doors)
               yoffset=0
-              if ldef.flags&0x4!=0 then
+              if ldef.dontpegtop then
                 yoffsettop=otop-top
               end
               -- make sure bottom is not crossing this side top
@@ -688,10 +688,11 @@ function hitscan_attack(owner,angle,range,dmg,puff)
       -- actual hit position
       local pos={owner[1],owner[2]}
       v2_add(pos,move_dir,fix_move.ti)
-      add_thing(make_thing(puff,pos[1],pos[2],h,angle))
+      local puffthing=make_thing(puff,pos[1],pos[2],h+rnd(4)-2,angle)
+      add_thing(puffthing)
 
       -- hit thing
-      if(otherthing and otherthing.hit) otherthing:hit(dmg,move_dir,owner)
+      if(otherthing and otherthing.hit) puffthing:jump_to(otherthing.actor.noblood and 0 or 11,0) otherthing:hit(dmg,move_dir,owner)
       return true
     end
   end)
@@ -735,11 +736,8 @@ function make_thing(actor,x,y,z,angle,special)
     trigger=special
   }
   
-  if actor.is_shootable then
-    -- shootable
-    thing=with_physic(with_health(thing))
-  end
-  return thing,actor
+  -- additional wrapper if shootable
+  return actor.is_shootable and with_physic(with_health(thing)) or thing,actor
 end
 
 -- sector damage
@@ -758,7 +756,7 @@ function intersect_line(seg,h,height,clearance,is_missile,is_dropoff)
 
   return otherside==nil or 
     -- impassable
-    (not is_missile and ldef.flags&0x40>0) or
+    (not is_missile and ldef.blocking) or
     h+height>otherside[1].ceil or 
     h+clearance<otherside[1].floor or 
     -- avoid monster jumping off cliffs
@@ -817,9 +815,8 @@ function with_physic(thing)
           if hit.seg then
             fix_move=intersect_line(hit.seg,h,height,stair_h,is_missile,actor.is_dropoff) and hit
             -- cross special?
-            -- todo: supports monster activated triggers
             local ldef=hit.seg.line
-            if is_player and ldef.trigger and ldef.flags&0x10>0 then
+            if is_player and ldef.trigger and ldef.playercross then
               ldef.trigger(self)
             end
           else
@@ -872,11 +869,7 @@ function with_physic(thing)
         -- refresh sector after fixed collision
         ss=find_sub_sector(_bsp,self)
 
-        self.sector=ss.sector
-        self.ssector=ss
-
-        -- refresh overlapping sectors
-        self.subs={}
+        self.sector,self.ssector,self.subs=ss.sector,ss,{}
         register_thing_subs(_bsp,self,radius/2)
       else
         velocity={0,0}
@@ -888,7 +881,7 @@ function with_physic(thing)
         intersect_sub_sector(ss,self,{cos(self.angle),-sin(self.angle)},0,radius+48,0,function(hit)
           local ldef=hit.seg.line
           -- buttons
-          if ldef.trigger and ldef.flags&0x8>0 then
+          if ldef.trigger and ldef.playeruse then
             -- use special?
             if btnp(🅾️) then
               ldef.trigger(self)
@@ -1416,9 +1409,17 @@ function unpack_chr()
   return chr(mpeek())
 end
 
+-- convert numeric flags to "not nil" tests
+function with_flags(item,flags,all_flags)
+  for i=1,#all_flags,2 do
+    if(flags&all_flags[i]!=0) item[all_flags[i+1]]=true
+  end
+  return item
+end
+
 -- inventory & things
-function unpack_actor_ref(actors)
-  return actors[unpack_variant()]
+function unpack_ref(a)
+  return a[unpack_variant()]
 end
 
 function unpack_special(sectors,actors)
@@ -1428,7 +1429,7 @@ function unpack_special(sectors,actors)
     local moving_sectors={}
     -- backup heights
     unpack_array(function()
-      local sector=sectors[unpack_variant()]      
+      local sector=unpack_ref(sectors)
       -- "stable" state = always floor
       sector.init=sector.floor
       sector.target=unpack_fixed()
@@ -1495,7 +1496,7 @@ function unpack_special(sectors,actors)
     -- sectors
     local target_sectors={}
     unpack_array(function()
-      add(target_sectors,sectors[unpack_variant()])
+      add(target_sectors,unpack_ref(sectors))
     end)
     local lightlevel=mpeek()/255
     return function()
@@ -1539,13 +1540,13 @@ function unpack_actors()
 
   -- inventory & things
   -- actor properties + skill ammo factor
-  local properties_factory=split("0x0.0001,health,unpack_variant,0x0.0002,armor,unpack_variant,0x0.0004,amount,unpack_variant,0x0.0008,maxamount,unpack_variant,0x0.0010,icon,unpack_chr,0x0.0020,slot,mpeek,0x0.0040,ammouse,unpack_variant,0x0.0080,speed,unpack_variant,0x0.0100,damage,unpack_variant,0x0.0200,ammotype,unpack_actor_ref,0x0.0800,mass,unpack_variant,0x0.1000,pickupsound,unpack_variant,0x0.2000,attacksound,unpack_variant,0x0.4000,hudcolor,unpack_variant,0x0.8000,deathsound,unpack_variant,0x1,meleerange,unpack_variant,0x2,maxtargetrange,unpack_variant,0x4,ammogive,unpack_variant,0x8,trailtype,unpack_actor_ref",",",1)
+  local properties_factory=split("0x0.0001,health,unpack_variant,0x0.0002,armor,unpack_variant,0x0.0004,amount,unpack_variant,0x0.0008,maxamount,unpack_variant,0x0.0010,icon,unpack_chr,0x0.0020,slot,mpeek,0x0.0040,ammouse,unpack_variant,0x0.0080,speed,unpack_variant,0x0.0100,damage,unpack_variant,0x0.0200,ammotype,unpack_ref,0x0.0800,mass,unpack_variant,0x0.1000,pickupsound,unpack_variant,0x0.2000,attacksound,unpack_variant,0x0.4000,hudcolor,unpack_variant,0x0.8000,deathsound,unpack_variant,0x1,meleerange,unpack_variant,0x2,maxtargetrange,unpack_variant,0x4,ammogive,unpack_variant,0x8,trailtype,unpack_ref",",",1)
 
   -- actors functions
   local function_factory={
     -- A_FireBullets
     function()
-      local xspread,yspread,bullets,dmg,puff=unpack_fixed(),unpack_fixed(),mpeek(),mpeek(),unpack_actor_ref(actors)
+      local xspread,yspread,bullets,dmg,puff=unpack_fixed(),unpack_fixed(),mpeek(),mpeek(),unpack_ref(actors)
       return function(owner)
         for i=1,bullets do
           hitscan_attack(owner,owner.angle+(rnd(2*xspread)-xspread)/360,1024,dmg,puff)
@@ -1562,7 +1563,7 @@ function unpack_actors()
     end,
     -- A_FireProjectile
     function()
-      local projectile=unpack_actor_ref(actors)
+      local projectile=unpack_ref(actors)
       return function(owner)
         -- fire at 1/2 edge of owner radius (ensure collision when close to walls)
         local angle,speed,radius=owner.angle,projectile.speed,owner.actor.radius/2
@@ -1680,7 +1681,7 @@ function unpack_actors()
     end,
     -- A_MeleeAttack
     function()
-      local dmg,puff=mpeek(),unpack_actor_ref(actors)
+      local dmg,puff=mpeek(),unpack_ref(actors)
       return function(owner)
         hitscan_attack(owner,owner.angle,owner.meleerange or 64,dmg,puff)
       end
@@ -1717,11 +1718,11 @@ function unpack_actors()
   -- float
   -- dropoff
   -- dontfall
-  local all_flags=split("0x1,is_solid,0x2,is_shootable,0x4,is_missile,0x8,is_monster,0x10,is_nogravity,0x20,floating,0x40,is_dropoff,0x80,is_dontfall,0x100,randomize,0x200,countkill,0x400,nosectordmg",",",1)
+  local all_flags=split("0x1,is_solid,0x2,is_shootable,0x4,is_missile,0x8,is_monster,0x10,is_nogravity,0x20,floating,0x40,is_dropoff,0x80,is_dontfall,0x100,randomize,0x200,countkill,0x400,nosectordmg,0x800,noblood",",",1)
   unpack_array(function()
-    local kind,id,flags,state_labels,states,weapons,active_slot,inventory=unpack_variant(),unpack_variant(),mpeek()|mpeek()<<8,{},{},{}
+    local kind,id,state_labels,states,weapons,active_slot,inventory=unpack_variant(),unpack_variant(),{},{},{}
 
-    local item={
+    local item=with_flags({
       id=id,
       kind=kind,
       radius=unpack_fixed(),
@@ -1779,11 +1780,7 @@ function unpack_actors()
 
         return thing
       end
-    }
-    -- convert numeric flags to "not nil" tests
-    for i=1,#all_flags,2 do
-      if(flags&all_flags[i]!=0) item[all_flags[i+1]]=true
-    end
+    },mpeek()|mpeek()<<8,all_flags)
 
     local properties=unpack_fixed()
     -- decode 
@@ -1796,7 +1793,7 @@ function unpack_actors()
     -- startitems (always packed at the end)
     if properties&0x0.0400!=0 then
       unpack_array(function()
-        local startitem,amount=unpack_actor_ref(actors),unpack_variant()
+        local startitem,amount=unpack_ref(actors),unpack_variant()
         if startitem.kind==2 then
           -- weapon
           weapons=weapons or {}
@@ -1877,7 +1874,7 @@ function unpack_actors()
         cmd={mpeek()-128,mpeek(),flags&0x4>0,0}
         -- get all pose sides
         unpack_array(function(i)
-          add(cmd,frames[unpack_variant()])
+          add(cmd,unpack_ref(frames))
           -- number of sides
           cmd[4]=i
         end)
@@ -1947,7 +1944,7 @@ function unpack_map(skill,actors)
     unpack_array(function()
       add(sides,{
         -- 1: sector reference
-        sectors[unpack_variant()],
+        unpack_ref(sectors),
         -- bottomtex
         unpack_fixed(),
         -- midtex
@@ -1962,14 +1959,14 @@ function unpack_map(skill,actors)
       add(verts,{unpack_fixed(),unpack_fixed()})
     end)
 
+    local all_flags=split("0x1,twosided,0x2,special,0x4,dontpegtop,0x8,playeruse,0x10,playercross,0x20,repeatspecial,0x40,blocking",",",1)
     unpack_array(function()
-      local line=add(lines,{
+      local line=add(lines,with_flags({
         -- sides
-        [true]=sides[unpack_variant()],
-        [false]=sides[unpack_variant()],
-        flags=mpeek()}) 
+        [true]=unpack_ref(sides),
+        [false]=unpack_ref(sides)},mpeek(),all_flags))
       -- special actions
-      if line.flags&0x2>0 then
+      if line.special then
         local special,actorlock=unpack_special(sectors,actors)             
         line.trigger=function(thing)
           -- need lock?
@@ -1997,7 +1994,7 @@ function unpack_map(skill,actors)
           -- do the action *outside* of a coroutine
           special()
           -- repeatable?
-          if line.flags&32>0 then
+          if line.repeatspecial then
             do_async(function()
               -- avoid player hitting trigger/button right away
               wait_async(30)
@@ -2020,13 +2017,13 @@ function unpack_map(skill,actors)
           return band(pvs[id\32],0x0.0001<<(id&31))!=0
         end}
       unpack_array(function()
-        local v,flags=verts[unpack_variant()],mpeek()
+        local v,flags=unpack_ref(verts),mpeek()
         local s=add(segs,{
           -- 1: vertex
           v,
           side=flags&0x1==0,
           -- optional links
-          line=flags&0x2>0 and lines[unpack_variant()],
+          line=flags&0x2>0 and unpack_ref(lines),
           partner=flags&0x4>0 and unpack_variant()
         })
 
@@ -2090,12 +2087,12 @@ function unpack_map(skill,actors)
     local function unpack_node(side,leaf)
       if leaf then
         node.leaf[side]=true
-        node[side]=sub_sectors[unpack_variant()]
+        node[side]=unpack_ref(sub_sectors)
       else
         -- bounding box only on non-leaves
         node.bbox=node.bbox or {}
         node.bbox[side]=unpack_bbox()
-        node[side]=nodes[unpack_variant()]
+        node[side]=unpack_ref(nodes)
       end
     end
     unpack_node(true,flags&0x1>0)
