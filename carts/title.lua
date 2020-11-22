@@ -66,17 +66,6 @@ end
 
 function menu_state()
   local mouse_ttl,mouse_x,mouse_y=0,0,0
-  local help_keyboard,help_mouse,help_i,help_ttl,help={
-    "",
-    "🅾️/(c)\23SELECT",
-    "❎/(x)\23BACK",
-    "(p)AUSE\23CONTROL OPTIONS"
-  },
-  {
-    "",
-    "LEFT MOUSE\23SELECT",
-    "RIGHT MOUSE\23BACK"
-  },0,90
   local menus,menu_i,anm_ttl={
     {"wHICH ePISODE?",_maps_label,sel=1,max=1},
     {"sELECT sKILL lEVEL",
@@ -97,13 +86,6 @@ function menu_state()
 
   return
     function()
-      help=help_keyboard
-      if help_ttl>0 then
-        help_ttl-=1
-      else
-        help_ttl=30
-        help_i+=1
-      end
       -- mouse?
       if peek(0x5f80)==1 then
         mouse_ttl=30
@@ -114,13 +96,10 @@ function menu_state()
       end
       if mouse_ttl>0 then
         mouse_ttl-=1
-        help=help_mouse
         -- reset control scheme if using mouse
         switch_scheme(0)
       end
       poke(0x5f80,0)
-
-      help_i=help_i%#help
 
       anm_ttl=(anm_ttl+1)%48
       if menu_i>0 then
@@ -197,8 +176,6 @@ function menu_state()
       
       if(mouse_ttl>0) palt(vcol(4),true) sspr(41,115,10,10,mouse_x,mouse_y) palt()
 
-      local s=help[help_i+1]
-      printb(s,64-#s*2,121,vcol(3),vcol(2))
       pal(title_gfx.pal,1)
     end,
     -- init
