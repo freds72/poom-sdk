@@ -65,6 +65,18 @@ function start_state()
 end
 
 function menu_state()
+  local mouse_ttl,mouse_x,mouse_y=0,0,0
+  local help_keyboard,help_mouse,help_i,help_ttl,help={
+    "",
+    "🅾️/(c)\23SELECT",
+    "❎/(x)\23BACK",
+    "(p)AUSE\23CONTROL OPTIONS"
+  },
+  {
+    "",
+    "LEFT MOUSE\23SELECT",
+    "RIGHT MOUSE\23BACK"
+  },0,90
   local menus,menu_i,anm_ttl={
     {"wHICH ePISODE?",_maps_label,sel=1,max=1},
     {"sELECT sKILL lEVEL",
@@ -85,24 +97,61 @@ function menu_state()
 
   return
     function()
+      help=help_keyboard
+      if help_ttl>0 then
+        help_ttl-=1
+      else
+        help_ttl=30
+        help_i+=1
+      end
+      -- mouse?
+      if peek(0x5f80)==1 then
+        mouse_ttl=30
+        mouse_x+=(128-peek(0x5f81))/2
+        mouse_y+=(128-peek(0x5f82))/2
+        mouse_x=mid(mouse_x,0,126)
+        mouse_y=mid(mouse_y,0,126)
+      end
+      if mouse_ttl>0 then
+        mouse_ttl-=1
+        help=help_mouse
+        -- reset control scheme if using mouse
+        switch_scheme(0)
+      end
+      poke(0x5f80,0)
+
+      help_i=help_i%#help
+
       anm_ttl=(anm_ttl+1)%48
       if menu_i>0 then
         local active_sel=menus[menu_i].sel
-        if btnp(2) then
-          active_sel-=1
-          sfx(0)
+        if mouse_ttl>0 then
+          local prev_sel=active_sel
+          for i=1,#menus[menu_i][2] do
+            if i<=menus[menu_i].max and mouse_y>69+i*8 and mouse_y<=75+i*8 then
+              active_sel=i
+            end
+          end   
+          if(prev_sel!=active_sel) sfx(0)
+        else
+          if btnp(2) then
+            active_sel-=1
+            sfx(0)
+          end
+          if btnp(3) then
+            active_sel+=1
+            sfx(0)
+          end
+          -- unlocked?
+          active_sel=mid(active_sel,1,menus[menu_i].max)
         end
-        if btnp(3) then
-          active_sel+=1
-          sfx(0)
-        end
-        -- unlocked?
-        menus[menu_i].sel=mid(active_sel,1,menus[menu_i].max)
+        menus[menu_i].sel=active_sel
       end
-      if btnp(5) then
+
+      if btnp(❎) then
         if(menu_i>1)sfx(0)
         menu_i=max(1,menu_i-1)
-      elseif btnp(4) then
+      elseif btnp(🅾️) then
         if(menu_i>0)sfx(1)
         menu_i+=1
         if menu_i>#menus then
@@ -117,8 +166,8 @@ function menu_state()
       cls()
       memcpy(0x6000,0x4e00,64*13)
       spr(0,0,13,16,15)    
-      printb("@fsouchu",2,121,vcol(4))
-      printb("@gamecactus",83,121,vcol(4))
+      printb("@FSOUCHU",2,0,vcol(2))
+      printb("@GAMECACTUS",83,0,vcol(2))
 
       -- dark menu background
       -- todo: fix
@@ -126,26 +175,30 @@ function menu_state()
         pal(vcol(i),sget(112+i,129-13))
         --pset(i,0,i)
       end
-      sspr(12,51,104,19+#menus[menu_i][2]*9,12,64)
+      sspr(12,51,104,15+#menus[menu_i][2]*8,12,64)
       pal()
       
       -- title
-      printb(menus[menu_i][1],63-#menus[menu_i][1]*2,69,vcol(14))
+      printb(menus[menu_i][1],63-#menus[menu_i][1]*2,67,vcol(14))
 
       -- selection marker
-      rectfill(18,70+menus[menu_i].sel*9,113,79+menus[menu_i].sel*9,vcol(2))
+      rectfill(18,68+menus[menu_i].sel*8,113,75+menus[menu_i].sel*8,vcol(2))
       palt(vcol(0),false)
       palt(vcol(4),true)
-      sspr(anm_ttl\12*10,115,11,12,14,68+menus[menu_i].sel*9)
+      sspr(anm_ttl\12*10,115,11,12,14,65+menus[menu_i].sel*8)
       palt()
 
       -- menu items
       for i=1,#menus[menu_i][2] do
         local s=menus[menu_i][2][i]
         if(i>menus[menu_i].max) s=masked(s)
-        printb(s,28,72+i*9,i<=menus[menu_i].max and vcol(4) or vcol(3))
+        printb(s,28,69+i*8,i<=menus[menu_i].max and vcol(4) or vcol(3))
       end
       
+      if(mouse_ttl>0) palt(vcol(4),true) sspr(41,115,10,10,mouse_x,mouse_y) palt()
+
+      local s=help[help_i+1]
+      printb(s,64-#s*2,121,vcol(3),vcol(2))
       pal(title_gfx.pal,1)
     end,
     -- init
@@ -319,9 +372,28 @@ function slicefade_state(...)
       memcpy(0x0,0x6000,8192)
     end
 end
+local _scheme=0
+function switch_scheme(scheme)
+  local scheme_help={
+    {caption="keyboard mode 1",btnfire=🅾️,btnuse=❎,btndown=⬇️,btnup=⬆️},
+    {caption="keyboard mode 2",btnfire=⬆️,btnuse=⬇️,btndown=7,btnup=7}
+  }
+  _scheme=scheme or ((_scheme+1)%2)
+  local s=scheme_help[_scheme+1]
+  menuitem(1,s.caption,switch_scheme)
+  -- save scheme
+  dset(34,_scheme)
+  dset(35,s.btnfire)
+  dset(36,s.btnuse)
+  dset(37,s.btndown)
+  dset(38,s.btnup)
+end
 
 function _init()
   cartdata(mod_name)
+
+  -- control scheme
+  switch_scheme(dget(34))
 
   -- sound effects
   local addr=0x3200

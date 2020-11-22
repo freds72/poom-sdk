@@ -217,9 +217,9 @@
 						if (abs(dy) > abs(dx) * 0.6) // vertical
 						{
 							// o button
-							if (dy < -deadzone) b |= 0x20;
+							if (dy < -deadzone) b |= 0x10;
 							// x button
-							if (dy > deadzone) b |= 0x10;
+							if (dy > deadzone) b |= 0x20;
 						}
 	
 						pico8_buttons[0] |= b;
@@ -245,10 +245,16 @@
 		// clear fire button
 		pico8_buttons[0] = 0;
 
+		// left (fire/ok)
 		if(e.buttons & 0x1) {
+			pico8_buttons[0] |= 0x10;
+		}
+		// right (open/cancel)
+		if(e.buttons & (0x2|0x8)) {
 			pico8_buttons[0] |= 0x20;
 		}
-		if(e.buttons & 0x2) {
+		// middle
+		if(e.buttons & 0x4) {
 			pico8_buttons[0] |= 0x40;
 		}
 	}

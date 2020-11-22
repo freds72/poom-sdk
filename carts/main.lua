@@ -1,5 +1,5 @@
 -- globals
-local _slow,_ambientlight,_ammo_factor,_intersectid,_onoff_textures,_transparent_textures,_bsp,_cam,_plyr,_things,_sprite_cache,_actors,_btns,_wp_hud,_msg=0,0,1,0,{[0]=0},{}
+local _slow,_ambientlight,_ammo_factor,_intersectid,_onoff_textures,_transparent_textures,_things,_btns,_bsp,_cam,_plyr,_sprite_cache,_actors,_wp_hud,_msg=0,0,1,0,{[0]=0},{},{},{}
 
 --local k_far,k_near=0,2
 --local k_right,k_left=4,8
@@ -371,8 +371,8 @@ function draw_flats(v_cache,segs)
     if #verts>2 then
       local sector,pal0=segs.sector
       local floor,ceil,light,things=sector.floor,sector.ceil,max(sector.lightlevel,_ambientlight),{}
-      -- not visible?
-      if(floor+m8<0) polyfill(verts,sector.tx or 0,floor,sector.floortex,light)
+      -- not visible or no texture?
+      if(sector.floortex!=0 and floor+m8<0) polyfill(verts,sector.tx or 0,floor,sector.floortex,light)
       if(ceil+m8>0) polyfill(verts,0,ceil,sector.ceiltex,light)
 
       -- draw walls
@@ -789,7 +789,7 @@ function with_physic(thing)
       -- alive floating actor? : track target height
       if not self.dead and actor.floating then
         dz+=rnd(1.6)-0.9
-        if(self.target) dz+=mid((self.target[3]-self[3])>>8,-2,2)
+        if(self.target) dz+=mid(self.target[3]-self[3],-512,512)>>8
         -- avoid woobling
         dz*=friction
       end
@@ -883,7 +883,7 @@ function with_physic(thing)
           -- buttons
           if ldef.trigger and ldef.playeruse then
             -- use special?
-            if btnp(🅾️) then
+            if btnp(_btnuse) then
               ldef.trigger(self)
             end
             -- trigger/message only closest hit
@@ -962,7 +962,7 @@ function with_health(thing)
       self.health=max(self.health-hp)\1
       if self.health==0 then
         -- register kill
-        if(instigator==_plyr and self.actor.countkill) _kills+=1
+        if(self.actor.countkill) _kills+=1
 
         die(self,dmg)
       end
@@ -991,8 +991,7 @@ function with_health(thing)
 end
 
 function attach_plyr(thing,actor,skill)
-  local dmg_factor=({0.5,1,1,2})[skill]
-  local bobx,boby,speed,da,wp,wp_slot,wp_yoffset,wp_y,hit_ttl,wp_switching=0,0,actor.speed,0,thing.weapons,thing.active_slot,0,0,0
+  local bobx,boby,speed,da,wp,wp_slot,wp_yoffset,wp_y,hit_ttl,dmg_factor,wp_switching=0,0,actor.speed,0,thing.weapons,thing.active_slot,0,0,0,pack(0.5,1,1,2)[skill]
 
   local function wp_switch(slot)
     if(wp_switching) return
@@ -1020,7 +1019,7 @@ function attach_plyr(thing,actor,skill)
           -- but button state is updated only on first frame
           -- skip button state check in this case (e.g. keep hud open)
           if(_slow==0) _wp_hud=not (btn(6) or btn(6,1))
-          for i,k in pairs{0,3,1,2,4} do
+          for i,k in pairs{0,3,1,2,❎} do
             if btnp(k) or btnp(k,1) then
               -- only switch if we have the weapon and it's not the current weapon
               _wp_hud,_btns=(wp_slot!=i and wp[i]) and wp_switch(i),{}
@@ -1031,21 +1030,21 @@ function attach_plyr(thing,actor,skill)
           -- cursor+x: weapon switch+rotate
           -- wasd: fwd+strafe
           -- o: fire
-          if btn(🅾️) then
-            if(_btns[0]) dx=1
-            if(_btns[1]) dx=-1
           -- direct mouse input?
-          elseif peek(0x5f80)==1 then
+          if peek(0x5f80)==1 then
             da+=(128-peek(0x5f81))/8
             daf=0.2
             poke(0x5f80,0)
+          elseif btn(❎) then
+            if(_btns[0]) dx=1
+            if(_btns[1]) dx=-1
           else
             if(_btns[0]) da-=0.75
             if(_btns[1]) da+=0.75
           end
 
-          if(_btns[2]) dz=1
-          if(_btns[3]) dz=-1
+          if(_btns[_btnup]) dz=1
+          if(_btns[_btndown]) dz=-1
 
           _wp_hud=btn(6)
           poke(0x5f30,1)
@@ -1208,8 +1207,6 @@ end
 --_max_cpu,_max_cpu_ttl=0,0
 
 function play_state()
-  _things,_btns,_wp_hud={},{}
-  
   -- stop music (eg. restart game)
   music(-1)
 
@@ -1262,7 +1259,7 @@ function play_state()
       draw_bsp()
       _plyr:hud()
 
-      if(_msg) print(_msg,64-#_msg*2,120,15)
+      if(_msg) printb(_msg,64-#_msg*2,50,15)
 
       -- spr(0,0,64,16,8)
       -- debug messages
@@ -1301,10 +1298,10 @@ function gameover_state(pos,angle,target,h)
       idle_ttl-=1
       -- avoid immediate button hit
       if idle_ttl<0 then
-        if btnp(🅾️) then
+        if btnp(_btnuse) then
           -- 1: gameover    
           load(mod_name.."_0.p8",nil,_skill..",".._map_id..",1")
-        elseif btnp(❎) then
+        elseif btnp(_btnfire) then
           -- 3: retry
           load(mod_name.."_0.p8",nil,_skill..",".._map_id..",3")
         end
@@ -1314,7 +1311,7 @@ function gameover_state(pos,angle,target,h)
     function()
       draw_bsp()
 
-      if(time()%4<2) printb("you died - ❎ restart/🅾️ menu",8,120,12)
+      if(time()%4<2) printb("      you died\n\nFIRE\23RESTART USE\23MENU",22,108,12)
 
       -- set screen palette
       -- pal({140,1,139,3,4,132,133,7,6,134,5,8,2,9,10},1)
@@ -1336,8 +1333,8 @@ function _init()
   -- launch params
   local p=split(stat(6))
   _skill,_map_id=tonum(p[1]) or 2,tonum(p[2]) or 1
-  -- sky texture
-  _sky_height,_sky_offset=_maps_sky[_map_id*2-1],_maps_sky[_map_id*2]
+  -- sky texture + load keyboard control mapping
+  _sky_height,_sky_offset,_btnfire,_btnuse,_btndown,_btnup=_maps_sky[_map_id*2-1],_maps_sky[_map_id*2],dget(35),dget(36),dget(37),dget(38)
   -- skybox fill pattern
   fillp(0xaaaa)
 
@@ -1352,19 +1349,17 @@ function _update()
   end
 
   -- any futures?
-  local tmp={}
-  for k,async_handle in pairs(_futures) do
+  for i=#_futures,1,-1 do
     -- get actual coroutine
-    local f=async_handle.co
+    local f=_futures[i].co
     -- still active?
     if f and costatus(f)=="suspended" then
-      -- todo: remove assert for release
-      assert(coresume(f))
-      add(tmp,async_handle)
+      coresume(f)
+    else
+      deli(_futures,i)
     end
   end
-  _futures=tmp
-
+  
   -- decay flash light
   _ambientlight*=0.8
   -- keep world running
@@ -1506,12 +1501,16 @@ function unpack_special(sectors,actors)
     end
   elseif special==243 then
     -- exit level
+    local delay=unpack_variant()    
     return function()
       -- save player's state
       _plyr:save()
-
-      -- record level completion time + send stats
-      load(mod_name.."_0.p8",nil,_skill..",".._map_id..",2,"..(time()-_start_time)..",".._kills..",".._monsters..",".._secrets)
+      local t=time()-_start_time
+      do_async(function()
+        wait_async(delay)
+        -- record level completion time + send stats
+        load(mod_name.."_0.p8",nil,_skill..",".._map_id..",2,"..t..",".._kills..",".._monsters..",".._secrets)
+      end)
     end
   end
 end
@@ -1578,7 +1577,7 @@ function unpack_actors()
     -- A_WeaponReady
     function(item)
       return function(owner,weapon)
-        if not _wp_hud and btn(❎) then
+        if not _wp_hud and btn(_btnfire) then
           local inventory,ammotype,newqty=owner.inventory,item.ammotype,0
           -- handle "fist" (eg weapon without ammotype)
           if(ammotype) newqty=inventory[ammotype]-item.ammouse
@@ -1821,7 +1820,7 @@ function unpack_actors()
       end
     end
     
-    local pickup_factory={
+    item.pickup=pack(
       -- default inventory item (ex: lock)
       function(thing,target)
         pickup(thing,target.inventory)
@@ -1844,8 +1843,7 @@ function unpack_actors()
       function(thing,target)
         pickup(thing,target,"armor")
       end
-    }
-    item.pickup=pickup_factory[kind+1]
+    )[kind+1]
     
     -- actor states
     unpack_array(function()
