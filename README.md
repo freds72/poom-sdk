@@ -325,6 +325,7 @@ where supported *map* properties are:
 |next | string | lump name of next level. Use ```"endgame"``` to move to game over screen|
 |music | integer | (optional) background music identifier. See [Music & Sound]() section |
 |sky1 | string | skybox gradient image name. Required if level has "none" ceiling textures. |
+|location | integer,integer | (optional) Map marker location (pixels) on loading map |
 
 where supported *gameinfo* properties are:
 | property | Type | Description |
@@ -338,6 +339,7 @@ map E1M1 "Hangar"
 	levelnum = 1
 	next = "E1M2"
 	music = 0
+  location = 35,85
 }
 
 map E1M2 "Docks"
