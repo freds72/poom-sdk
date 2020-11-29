@@ -1,5 +1,5 @@
 -- globals
-local _slow,_ambientlight,_ammo_factor,_intersectid,_onoff_textures,_transparent_textures,_futures,_things,_btns,_bsp,_cam,_plyr,_sprite_cache,_actors,_wp_hud,_msg=0,0,1,0,{[0]=0},{},{},{},{}
+local _slow,_ambientlight,_drag,_ammo_factor,_intersectid,_onoff_textures,_transparent_textures,_futures,_things,_btns,_bsp,_cam,_plyr,_sprite_cache,_actors,_wp_hud,_msg=0,0,0,1,0,{[0]=0},{},{},{},{}
 
 --local k_far,k_near=0,2
 --local k_right,k_left=4,8
@@ -772,14 +772,14 @@ function with_physic(thing)
   local actor=thing.actor
   -- actor properties
   local height,radius,mass,is_missile,is_player=actor.height,actor.radius,2*actor.mass,actor.is_missile,actor.id==1
-  local ss,friction,forces,velocity,dz=thing.ssector,is_missile and 0.9967 or 0.9062,{0,0},{0,0},0
+  local ss,friction,forces,velocity,dz=thing.ssector,is_missile and 0.9967 or 0.9062,{0,0},{0,0},0  
   return inherit({
     apply_forces=function(self,x,y,mag)
       -- todo: review arbitrary factor...
       mag<<=6
       forces[1]+=mag*x/mass
       forces[2]+=mag*y/mass
-    end,
+    end,    
     update=function(self)
       -- integrate forces
       v2_add(velocity,forces)
@@ -793,9 +793,11 @@ function with_physic(thing)
       -- gravity?
       if(not actor.is_nogravity or (self.dead and not actor.is_dontfall)) dz-=1
 
-      -- friction     
+      -- x/y friction
+      local friction=is_player and friction*(1-_drag) or friction
       velocity[1]*=friction
-      velocity[2]*=friction      
+      velocity[2]*=friction
+      
       -- check collision with world
       local move_dir,move_len=v2_normal(velocity)
       
@@ -953,8 +955,8 @@ function with_health(thing)
       -- damage reduction?
       local hp,armor=dmg,self.armor or 0
       if armor>0 then
-        hp=0.7*dmg
-        self.armor=max(armor-0.3*dmg)\1
+        hp=0.3*dmg
+        self.armor=max(armor-dmg)\1
       end
       self.health=max(self.health-hp)\1
       if self.health==0 then
@@ -987,8 +989,8 @@ function with_health(thing)
   },thing)
 end
 
-function attach_plyr(thing,actor,skill)
-  local bobx,boby,speed,da,wp,wp_slot,wp_yoffset,wp_y,hit_ttl,dmg_factor,wp_switching=0,0,actor.speed,0,thing.weapons,thing.active_slot,0,0,0,pack(0.5,1,1,2)[skill]
+function attach_plyr(thing,actor)
+  local bobx,boby,speed,da,wp,wp_slot,wp_yoffset,wp_y,hit_ttl,dmg_factor,wp_switching=0,0,actor.speed,0,thing.weapons,thing.active_slot,0,0,0,pack(0.5,1,1,2)[_skill]
 
   local function wp_switch(slot)
     if(wp_switching) return
@@ -1135,11 +1137,11 @@ function attach_plyr(thing,actor,skill)
       end
     end,
     -- restore state
-    load=function(self,actors)
+    load=function(self)
       if dget(0)>0 then
         self.health,self.armor=dget(1),dget(2)
         for i=1,5 do
-          local actor=actors[dget(i+2)]
+          local actor=_actors[dget(i+2)]
           if actor then
             -- create thing
             self:attach_weapon(actor:attach{})
@@ -1211,22 +1213,20 @@ function play_state()
 
   -- ammo scaling factor
   _ammo_factor=split"2,1,1,1"[_skill]
-  local bsp,thingdefs=decompress(mod_name,_maps_cart[_map_id],_maps_offset[_map_id],unpack_map,_skill,_actors)
-  _bsp=bsp
+  local bsp,thingdefs=decompress(mod_name,_maps_cart[_map_id],_maps_offset[_map_id],unpack_map)
+  -- geometry + misc game counters  
+  _bsp,_kills,_monsters,_found,_secrets=bsp,0,0,{},0
 
   -- restore main data cart
   reload()
-
-  -- misc game counters
-  _kills,_monsters,_found,_secrets=0,0,{},0
 
   -- attach behaviors to things
   for _,thingdef in pairs(thingdefs) do 
     local thing,actor=make_thing(unpack(thingdef))
     -- get direct access to player
     if actor.id==1 then
-      _plyr=attach_plyr(thing,actor,_skill)
-      _plyr:load(_actors)
+      _plyr=attach_plyr(thing,actor)
+      _plyr:load()
       thing=_plyr
     end    
     if(actor.countkill) _monsters+=1
@@ -1297,10 +1297,10 @@ function gameover_state(pos,angle,target,h)
       if idle_ttl<0 then
         if btnp(_btnuse) then
           -- 1: gameover    
-          load(mod_name.."_0.p8",nil,_skill..",".._map_id..",1")
+          load(title_cart,nil,_skill..",".._map_id..",1")
         elseif btnp(_btnfire) then
           -- 3: retry
-          load(mod_name.."_0.p8",nil,_skill..",".._map_id..",3")
+          load(title_cart,nil,_skill..",".._map_id..",3")
         end
       end
     end,
@@ -1324,7 +1324,7 @@ function _init()
 
   -- exit menu entry
   menuitem(1,"main menu",function()
-    load(mod_name.."_0.p8")
+    load(title_cart)
   end)
   
   -- launch params
@@ -1358,8 +1358,10 @@ function _update()
     end
   end
   
-  -- decay flash light
+  -- decay flash light  
   _ambientlight*=0.8
+  -- decay drag
+  _drag*=0.83
   -- keep world running
   for thing in all(_things) do
     if(thing:tick() and thing.update) thing:update()
@@ -1417,7 +1419,7 @@ function unpack_ref(a)
   return a[unpack_variant()]
 end
 
-function unpack_special(sectors,actors)
+function unpack_special(sectors)
   local special=mpeek()
   local function unpack_moving_sectors(what)
     -- door speed: https://zdoom.org/wiki/Map_translator#Constants
@@ -1479,7 +1481,7 @@ function unpack_special(sectors,actors)
       end
     end,
     -- lock id 0 is no lock
-    actors[lock]
+    _actors[lock]
   end
 
   if special==13 then
@@ -1507,7 +1509,7 @@ function unpack_special(sectors,actors)
       do_async(function()
         wait_async(delay)
         -- record level completion time + send stats
-        load(mod_name.."_0.p8",nil,_skill..",".._map_id..",2,"..t..",".._kills..",".._monsters..",".._secrets)
+        load(title_cart,nil,_skill..",".._map_id..",2,"..t..",".._kills..",".._monsters..",".._secrets)
       end)
     end
   end
@@ -1537,7 +1539,7 @@ function unpack_actors()
 
   -- inventory & things
   -- actor properties + skill ammo factor
-  local properties_factory=split("0x0.0001,health,unpack_variant,0x0.0002,armor,unpack_variant,0x0.0004,amount,unpack_variant,0x0.0008,maxamount,unpack_variant,0x0.0010,icon,unpack_chr,0x0.0020,slot,mpeek,0x0.0040,ammouse,unpack_variant,0x0.0080,speed,unpack_variant,0x0.0100,damage,unpack_variant,0x0.0200,ammotype,unpack_ref,0x0.0800,mass,unpack_variant,0x0.1000,pickupsound,unpack_variant,0x0.2000,attacksound,unpack_variant,0x0.4000,hudcolor,unpack_variant,0x0.8000,deathsound,unpack_variant,0x1,meleerange,unpack_variant,0x2,maxtargetrange,unpack_variant,0x4,ammogive,unpack_variant,0x8,trailtype,unpack_ref",",",1)
+  local properties_factory=split("0x0.0001,health,unpack_variant,0x0.0002,armor,unpack_variant,0x0.0004,amount,unpack_variant,0x0.0008,maxamount,unpack_variant,0x0.0010,icon,unpack_chr,0x0.0020,slot,mpeek,0x0.0040,ammouse,unpack_variant,0x0.0080,speed,unpack_variant,0x0.0100,damage,unpack_variant,0x0.0200,ammotype,unpack_ref,0x0.0800,mass,unpack_variant,0x0.1000,pickupsound,unpack_variant,0x0.2000,attacksound,unpack_variant,0x0.4000,hudcolor,unpack_variant,0x0.8000,deathsound,unpack_variant,0x1,meleerange,unpack_variant,0x2,maxtargetrange,unpack_variant,0x4,ammogive,unpack_variant,0x8,trailtype,unpack_ref,0x10,drag,unpack_fixed",",",1)
 
   -- actors functions
   local function_factory={
@@ -1583,12 +1585,14 @@ function unpack_actors()
             if(ammotype) inventory[ammotype]=newqty
             -- play attack sound
             if(item.attacksound) sfx(item.attacksound)
+            -- drag?
+            _drag=item.drag or 0
             -- fire state
             weapon:jump_to(9)
           end
         end
       end
-    end,
+    end,    
     -- A_Explode
     function()
       local dmg,maxrange=unpack_variant(),unpack_variant()
@@ -1894,7 +1898,7 @@ function switch_texture(line)
 end
 
 -- unpack level data (geometry + things)
-function unpack_map(skill,actors)
+function unpack_map()
   -- sectors
   local sectors,sub_sectors,nodes={},{},{}
   unpack_array(function()
@@ -1962,7 +1966,7 @@ function unpack_map(skill,actors)
         [false]=unpack_ref(sides)},mpeek(),all_flags))
       -- special actions
       if line.special then
-        local special,actorlock=unpack_special(sectors,actors)             
+        local special,actorlock=unpack_special(sectors)             
         line.trigger=function(thing)
           -- need lock?
           -- note: keep key in inventory (for reusable locked doors)
@@ -2108,11 +2112,11 @@ function unpack_map(skill,actors)
   local things={}
   local function unpack_thing()
     local flags,id,x,y=mpeek(),unpack_variant(),unpack_fixed(),unpack_fixed()
-    if flags&(0x10<<(skill-1))!=0 then
+    if flags&(0x10<<(_skill-1))!=0 then
       -- layout must match make_thing
       return add(things,{
         -- link to underlying actor
-        actors[id],
+        _actors[id],
         -- coordinates
         x,y,
         -- dummy height, extracted from sector
@@ -2128,7 +2132,7 @@ function unpack_map(skill,actors)
   -- things with special behaviors
   unpack_array(function()
     -- make sure to unpack special even if things does not appear on skill level
-    local thing,special=unpack_thing(),unpack_special(sectors,actors)
+    local thing,special=unpack_thing(),unpack_special(sectors)
     if thing then
       add(thing,function(self)
           -- avoid reentrancy

@@ -184,7 +184,7 @@ function menu_state()
         printb(s,28,69+i*8,i<=menus[menu_i].max and vcol(4) or vcol(3))
       end
       
-      if(mouse_ttl>0) palt(vcol(4),true) sspr(41,115,10,10,mouse_x,mouse_y) palt()
+      if(mouse_ttl>0) palt(vcol(4),true) sspr(41,116,10,10,mouse_x,mouse_y) palt()
 
       pal(title_gfx.pal,1)
     end,
