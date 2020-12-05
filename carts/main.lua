@@ -358,8 +358,7 @@ function draw_flats(v_cache,segs)
             end
             if otherside then
               -- visible other side walls?
-              otop=otherside[1].ceil>>4
-              obottom=otherside[1].floor>>4
+              otop,obottom=otherside[1].ceil>>4,otherside[1].floor>>4
               -- offset animated walls (doors)
               yoffset=0
               if ldef.dontpegtop then
@@ -1360,7 +1359,7 @@ function _update()
 
   _update_state()
   -- capture video!
-  if(peek(0x5f83)==1) extcmd("video") poke(0x5f83)
+  if(peek(0x5f83)==1) poke(0x5f83,0) extcmd("video") 
   _slow+=1
 end
 

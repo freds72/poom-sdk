@@ -229,35 +229,32 @@
 		}
 	
 		function track_mouse(e) {
-	
 			// enable mouse reading
 			pico8_gpio[0] = 1;
 			// clamp value to -127/127
-			var canvas = document.getElementById("canvas");
-			var scale = 128 / canvas.width;
-			pico8_gpio[1] = 128 - Math.min(Math.max(-127,Math.round(scale * e.movementX)),127);
-			pico8_gpio[2] = 128 - Math.min(Math.max(-127,Math.round(scale * e.movementY)),127);
+			pico8_gpio[1] = 128 - Math.min(Math.max(-127,Math.round(e.movementX)),127);
+			pico8_gpio[2] = 128 - Math.min(Math.max(-127,Math.round(e.movementY)),127);
 		}
 	
 		function track_click(e, step) {
-		if (!p8_is_running) return;
+			if (!p8_is_running) return;
 
-		// clear fire button
-		pico8_buttons[0] = 0;
+			// clear fire button
+			pico8_buttons[0] = 0;
 
-		// left (fire/ok)
-		if(e.buttons & 0x1) {
-			pico8_buttons[0] |= 0x10;
+			// left (fire/ok)
+			if(e.buttons & 0x1) {
+				pico8_buttons[0] |= 0x10;
+			}
+			// right (open/cancel)
+			if(e.buttons & (0x2|0x8)) {
+				pico8_buttons[0] |= 0x20;
+			}
+			// middle
+			if(e.buttons & 0x4) {
+				pico8_buttons[0] |= 0x40;
+			}
 		}
-		// right (open/cancel)
-		if(e.buttons & (0x2|0x8)) {
-			pico8_buttons[0] |= 0x20;
-		}
-		// middle
-		if(e.buttons & 0x4) {
-			pico8_buttons[0] |= 0x40;
-		}
-	}
 		
 		// p8_update_layout_hash is used to decide when to update layout (expensive especially when part of a heavy page)
 		var p8_update_layout_hash = -1;
@@ -552,8 +549,8 @@
 			addEventListener("touchmove",  function(event){ pico8_buttons_event(event, 1); }, {passive: false});
 			addEventListener("touchend",   function(event){ pico8_buttons_event(event, 2); }, {passive: false});
 	
-						// https://developer.mozilla.org/en-US/docs/Web/API/Pointer_Lock_API
-						if(!p8_touch_detected) {
+			// https://developer.mozilla.org/en-US/docs/Web/API/Pointer_Lock_API
+			if(!p8_touch_detected) {
 				// pointer lock object forking for cross browser
 				var canvas = document.getElementById("canvas");
 	
@@ -562,23 +559,24 @@
 	
 				document.exitPointerLock = document.exitPointerLock ||
 																	document.mozExitPointerLock;
-	
-				canvas.onclick = function() {
-					canvas.requestPointerLock();
-				};
-	
+
+				canvas.addEventListener("click", function() {
+					// need to watch: https://www.chromestatus.com/feature/5723553087356928
+					canvas.requestPointerLock();					
+				});
+
 				// pointer lock event listeners
 				function lockChangeAlert() {
 					if (document.pointerLockElement === canvas ||
 							document.mozPointerLockElement === canvas) {
-						document.addEventListener("mousemove", track_mouse, false);
-						document.addEventListener("mousedown", function(event){ track_click(event, 0); });
-						document.addEventListener("mouseup", function(event){ track_click(event, 1); });
+						canvas.addEventListener("mousemove", track_mouse, false);
+						canvas.addEventListener("mousedown", function(event){ track_click(event, 0); });
+						canvas.addEventListener("mouseup", function(event){ track_click(event, 1); });
 					} else {
 						// reset mouse values
 						pico8_gpio[0]=0
 						pico8_gpio[1]=0
-						document.removeEventListener("mousemove", track_mouse, false);
+						canvas.removeEventListener("mousemove", track_mouse, false);
 						// document.removeEventListener("click", function(event){ track_click(event, 0); }, false);
 					}
 				}	
@@ -586,6 +584,26 @@
 				// Hook pointer lock state change events for different browsers
 				document.addEventListener('pointerlockchange', lockChangeAlert, false);
 				document.addEventListener('mozpointerlockchange', lockChangeAlert, false);
+
+				// gif clear handling
+				// https://developer.mozilla.org/en-US/docs/Web/API/MutationObserver
+				// Select the node that will be observed for mutations
+				const gifsNode = document.getElementById('p8_desktop');
+				const trashNode = document.getElementById('p8b_trash');
+
+				// Options for the observer (which mutations to observe)
+				const config = { childList: true };
+
+				// Callback function to execute when mutations are observed
+				const callback = function(mutationsList, observer) {
+					trashNode.style.display = gifsNode.childElementCount==0?"none":"table";
+				};
+
+				// Create an observer instance linked to the callback function
+				const observer = new MutationObserver(callback);
+
+				// Start observing the target node for configured mutations
+				observer.observe(gifsNode, config);
 			}
 			
 			// load and run script
@@ -671,13 +689,31 @@
 		// key blocker. prevent cursor keys from scrolling page while playing cart.
 		// also don't act on M, R so that can mute / reset cart
 		document.addEventListener('keydown',
-		function (event) {
-			event = event || window.event;
-			if (!p8_is_running) return;
-			if (pico8_state.has_focus == 1)
-				if ([32, 37, 38, 39, 40, 77, 82, 80, 9].indexOf(event.keyCode) > -1)       // block cursors, M R P, tab
-					if (event.preventDefault) event.preventDefault();
-		},{passive: false});
+			function (event) {
+				event = event || window.event;
+				if (!p8_is_running) return;
+				if (pico8_state.has_focus == 1) {
+					if(event.keyCode==32) {
+						// gpio pin 3 contains "use" button code
+						pico8_buttons[0] |= pico8_gpio[3];
+					}
+
+					if ([37, 38, 39, 40, 77, 82, 80, 9].indexOf(event.keyCode) > -1)       // block cursors, M R P, tab
+						if (event.preventDefault) event.preventDefault();
+				}
+
+			},{passive: false});
+
+		document.addEventListener('keyup',
+			function (event) {
+				event = event || window.event;
+				if (!p8_is_running) return;
+				if (pico8_state.has_focus == 1)
+					if(event.keyCode==32) {
+						pico8_buttons[0] &= ~pico8_gpio[3];
+						if (event.preventDefault) event.preventDefault();
+					}
+			},{passive: false});
 	
 		// when using codo_textarea to determine focus, need to explicitly hand focus back when clicking a p8_menu_button
 		function p8_give_focus()
@@ -741,6 +777,26 @@
 		opacity:1.0;
 		cursor:pointer;
 	}
+
+	.p8_trash_button{
+		opacity:0.3;
+		padding:4px;
+		display:table;
+		width:24px;
+		height:24px;
+		float:right;
+	}
+	
+	@media screen and (min-width:512px) {
+		.p8_trash_button{
+			width:24px; margin-left:12px; margin-bottom:8px;
+		}
+	}
+
+	.p8_trash_button:hover{
+		opacity:1.0;
+		cursor:pointer;
+	}
 	
 	canvas{
 			image-rendering: optimizeSpeed;
@@ -787,7 +843,9 @@
 	<!-- Add any content above the cart here -->
 	
 	
-	<div id="p8_desktop" style="display:block; position:absolute; top:10px; left:10px"></div> <!-- desktop for saving gifs / screenshots -->
+	<div class="p8_trash_button" style="display:none; position:absolute; top:20px; left:129px" id="p8b_trash" onclick="document.getElementById('p8_desktop').innerHTML = '';"><img src="img/trash.png"></div>
+	<div id="p8_desktop" style="display:block; position:absolute; top:20px; left:10px"></div> <!-- desktop for saving gifs / screenshots -->
+
 	<div id="p8_frame_0" style="max-width:800px; max-height:800px; margin:auto;"> <!-- double function: limit size, and display only this div for touch devices -->
 	<div id="p8_frame" style="display:flex; width:100%; max-width:95vw; height:100vw; max-height:95vh; margin:auto;">
 	
@@ -820,6 +878,8 @@
 					<canvas class="emscripten" id="canvas" oncontextmenu="event.preventDefault();" >
 					</canvas>
 					<div class=p8_menu_buttons id="p8_menu_buttons" style="margin-left:10px;">
+						<!-- triggers pico8 native gif capture -->
+						<div class="p8_menu_button" style="position:absolute; bottom:165px" id="p8b_snap" onmousedown="document.getElementById('p8_desktop').innerHTML = '';" onmouseup="pico8_gpio[3]=1;"></div>
 						<div class="p8_menu_button" style="position:absolute; bottom:125px" id="p8b_controls" onClick="p8_give_focus(); Module.pico8ToggleControlMenu();"></div>					
 						<div class="p8_menu_button" style="position:absolute; bottom:90px" id="p8b_pause" onClick="p8_give_focus(); Module.pico8TogglePaused(); p8_update_layout_hash = -22;"></div>
 						<div class="p8_menu_button" style="position:absolute; bottom:55px" id="p8b_sound" onClick="p8_give_focus(); p8_create_audio_context(); Module.pico8ToggleSound();"></div>

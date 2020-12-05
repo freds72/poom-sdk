@@ -41,7 +41,7 @@ function next_state(fn,...)
     u()
         
     -- gif capture handling
-    if(peek(0x5f83)==1) extcmd("video") poke(0x5f83)
+    if(peek(0x5f83)==1) poke(0x5f83,0) extcmd("video") 
   end
 end
 
@@ -279,7 +279,7 @@ function launch_state(skill,id,level_time,kills,secrets)
         rect(63-#s*2-2,texty-2,63+#s*2,texty+6,15)
 
         -- left or right anchor
-        local xanchor=x<64 and 63-#s*2-2 or 63+#s*2
+        local xanchor=mid(x<64 and 63-#s*2-2 or 63+#s*2,32,96)
         line(xanchor,texty+6,xanchor,y,15)
         line(x,y)
         circfill(x,y,2)
@@ -292,9 +292,7 @@ end
 
 
 function credits_state()  
-  local ttl=0
-  local dither_pat={0b1111111111111111,0b0111111111111111,0b0111111111011111,0b0101111111011111,0b0101111101011111,0b0101101101011111,0b0101101101011110,0b0101101001011110,0b0101101001011010,0b0001101001011010,0b0001101001001010,0b0000101001001010,0b0000101000001010,0b0000001000001010,0b0000001000001000,0b0000000000000000}  
-  local t,creditsi={},0
+  local ttl,t,creditsi=0,{},0
   return
     -- update
     function()
@@ -332,14 +330,14 @@ function credits_state()
         local j=max(flr(#st*t[i]/3))+1        
         sp=sp..sub(st,j,j)
       end
-      print(sp,64-#sp*2,80,4)
+      print(sp,64-#sp*2,80,15)
 
-      if(ttl>0 and time()%4<2) print("🅾️/❎\23MENU",44,122,4)
+      if(ttl>0 and time()%4<2) print("🅾️/❎\23MENU",44,122,15)
 
       pal(endgame_gfx.pal,1)      
     end,
     function()
-      endgame_gfx.pal[15]=0
+      endgame_gfx.pal[15]=1
       unpack_gfx(endgame_gfx)
     end
 end
