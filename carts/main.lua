@@ -12,39 +12,6 @@ function inherit(t,parent)
   return setmetatable(t,{__index=parent})
 end
 
--- camera factory
-function make_camera()
-  return {
-    -- must be called before any rendering
-    track=function(self,pos,angle,height)
-      local ca,sa=-sin(angle),cos(angle)
-      self.u=ca
-      self.v=sa
-      -- world to cam matrix
-      self.m={
-        ca,-sa,-ca*pos[1]+sa*pos[2],
-        -height,
-        sa,ca,-sa*pos[1]-ca*pos[2]
-      }
-    end,
-    is_visible=function(self,bbox)    
-      local outcode,m1,m3,m4,_,m9,m11,m12=0xffff,unpack(self.m)
-      for i=1,8,2 do
-        local code,x,z=2,bbox[i],bbox[i+1]
-        -- x2: fov
-        local ax,az=(m1*x+m3*z+m4)<<1,m9*x+m11*z+m12
-        -- todo: optimize?
-        if(az>8) code=0
-        if(az>854) code|=1
-        if(ax>az) code|=4
-        if(-ax>az) code|=8
-        outcode&=code
-      end
-      return outcode==0
-    end
-  }
-end
-
 function lerp(a,b,t)
   -- faster by 1 cycle
   return a+t*(b-a)
@@ -1228,9 +1195,36 @@ function play_state()
     if(actor.countkill) _monsters+=1
     add_thing(thing)
   end
-  -- todo: release actors
 
-  _cam=make_camera()
+  _cam={
+    -- must be called before any rendering
+    track=function(self,pos,angle,height)
+      local ca,sa=-sin(angle),cos(angle)
+      self.u=ca
+      self.v=sa
+      -- world to cam matrix
+      self.m={
+        ca,-sa,-ca*pos[1]+sa*pos[2],
+        -height,
+        sa,ca,-sa*pos[1]-ca*pos[2]
+      }
+    end,
+    is_visible=function(self,bbox)    
+      local outcode,m1,m3,m4,_,m9,m11,m12=0xffff,unpack(self.m)
+      for i=1,8,2 do
+        local code,x,z=2,bbox[i],bbox[i+1]
+        -- x2: fov
+        local ax,az=(m1*x+m3*z+m4)<<1,m9*x+m11*z+m12
+        -- todo: optimize?
+        if(az>8) code=0
+        if(az>854) code|=1
+        if(ax>az) code|=4
+        if(-ax>az) code|=8
+        outcode&=code
+      end
+      return outcode==0
+    end
+  }
 
   -- start level music (if any)
   music(_maps_music[_map_id],0,14)
@@ -1271,6 +1265,7 @@ function play_state()
       print(cpu,2,3,3)
       print(cpu,2,2,15)    
       ]]     
+      -- printb(stat(0),2,2,15)
     end
 end
 
@@ -1399,7 +1394,7 @@ end
 -- convert numeric flags to "not nil" tests
 function with_flags(item,flags,all_flags)
   for i=1,#all_flags,2 do
-    item[all_flags[i+1]]=flags&all_flags[i]!=0 and true 
+    if(flags&all_flags[i]!=0) item[all_flags[i+1]]=true
   end
   return item
 end

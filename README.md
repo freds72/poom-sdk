@@ -208,6 +208,8 @@ The following triggers are supported:
 | 64 | Platform Up/Down/Stay | Lower/raise sector floor. See: [Platform Up/Down/Stay](https://zdoom.org/wiki/Plat_UpWaitDownStay) |
 | 112 | Light Change | Set sector light. See: [Light Change To Value](https://zdoom.org/wiki/Light_ChangeToValue)
 
+> specials 11/12/13 support an additional trigger delay parameter. Useful to time door close/opening after a fixed time.
+
 > lighttag property is not supported
 
 ### Animated Triggers
