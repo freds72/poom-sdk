@@ -47,15 +47,17 @@ end
 
 -- intro screen
 function start_state()
+  local ttl=300
   -- reset saved state
   dset(0,-1)
 
   return
     -- update
     function()    
-      if btnp()!=0 then
+      if ttl<0 or btnp(4) or btnp(5) then
         next_state(menu_state)
       end  
+      ttl-=1
     end,
     -- draw
     function()
@@ -164,7 +166,8 @@ function menu_state()
         pal(vcol(i),sget(112+i,128-11))
         --pset(i,0,i)
       end
-      sspr(12,51,104,15+#menus[menu_i][2]*8,12,64)
+      palt(0,false)
+      sspr(12,52,104,15+#menus[menu_i][2]*8,12,64)
       pal()
       
       -- title
@@ -306,6 +309,7 @@ function credits_state()
     -- draw
     function()
       cls()
+      pal()
       draw_gfx(endgame_gfx)  
       
       local i=flr(#_credits*ttl/600)
@@ -412,7 +416,7 @@ function _init()
   
   -- special case for end game state
   if(state==2 and mapid+1>#_maps_group) state=4
-
+  
   local states={
     -- default
     [0]={start_state},

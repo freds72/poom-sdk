@@ -858,7 +858,7 @@ function with_physic(thing)
         if h<sector.floor then
           -- found secret?
           if is_player and sector.special==195 and not _found[sector] then
-            _found[sector],_msg=true,"found secret!"
+            _found[sector],_msg=true,"a secret has been revealed!"
             _secrets+=1
             do_async(function()
               wait_async(30)
@@ -1264,7 +1264,6 @@ function play_state()
       print(cpu,2,3,3)
       print(cpu,2,2,15)    
       ]]     
-      -- printb(stat(0),2,2,15)
     end
 end
 
@@ -1310,6 +1309,8 @@ end
 -->8
 -- game loop
 function _init()
+  -- force gc
+  stat(0)
   cartdata(mod_name)
 
   -- exit menu entry

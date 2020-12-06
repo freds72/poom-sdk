@@ -584,26 +584,6 @@
 				// Hook pointer lock state change events for different browsers
 				document.addEventListener('pointerlockchange', lockChangeAlert, false);
 				document.addEventListener('mozpointerlockchange', lockChangeAlert, false);
-
-				// gif clear handling
-				// https://developer.mozilla.org/en-US/docs/Web/API/MutationObserver
-				// Select the node that will be observed for mutations
-				const gifsNode = document.getElementById('p8_desktop');
-				const trashNode = document.getElementById('p8b_trash');
-
-				// Options for the observer (which mutations to observe)
-				const config = { childList: true };
-
-				// Callback function to execute when mutations are observed
-				const callback = function(mutationsList, observer) {
-					trashNode.style.display = gifsNode.childElementCount==0?"none":"table";
-				};
-
-				// Create an observer instance linked to the callback function
-				const observer = new MutationObserver(callback);
-
-				// Start observing the target node for configured mutations
-				observer.observe(gifsNode, config);
 			}
 			
 			// load and run script
@@ -843,9 +823,6 @@
 	<!-- Add any content above the cart here -->
 	
 	
-	<div class="p8_trash_button" style="display:none; position:absolute; top:20px; left:129px" id="p8b_trash" onclick="document.getElementById('p8_desktop').innerHTML = '';"><img src="img/trash.png"></div>
-	<div id="p8_desktop" style="display:block; position:absolute; top:20px; left:10px"></div> <!-- desktop for saving gifs / screenshots -->
-
 	<div id="p8_frame_0" style="max-width:800px; max-height:800px; margin:auto;"> <!-- double function: limit size, and display only this div for touch devices -->
 	<div id="p8_frame" style="display:flex; width:100%; max-width:95vw; height:100vw; max-height:95vh; margin:auto;">
 	
@@ -879,7 +856,7 @@
 					</canvas>
 					<div class=p8_menu_buttons id="p8_menu_buttons" style="margin-left:10px;">
 						<!-- triggers pico8 native gif capture -->
-						<div class="p8_menu_button" style="position:absolute; bottom:165px" id="p8b_snap" onmousedown="document.getElementById('p8_desktop').innerHTML = '';" onmouseup="pico8_gpio[3]=1;"></div>
+						<div class="p8_menu_button" style="position:absolute; bottom:165px" id="p8b_snap" onmouseup="pico8_gpio[3]=1;"></div>
 						<div class="p8_menu_button" style="position:absolute; bottom:125px" id="p8b_controls" onClick="p8_give_focus(); Module.pico8ToggleControlMenu();"></div>					
 						<div class="p8_menu_button" style="position:absolute; bottom:90px" id="p8b_pause" onClick="p8_give_focus(); Module.pico8TogglePaused(); p8_update_layout_hash = -22;"></div>
 						<div class="p8_menu_button" style="position:absolute; bottom:55px" id="p8b_sound" onClick="p8_give_focus(); p8_create_audio_context(); Module.pico8ToggleSound();"></div>
