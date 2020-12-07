@@ -60,6 +60,7 @@ ZDoom Wiki (outstanding content folks!)
       --mod-name MOD_NAME   Game cart name (ex: poom)
       --map MAP             Map name to compile (ex: E1M1)
       --compress            Enable compression (default: false)
+      --compress-more       Enable adaptative compression (default: false)
       --release RELEASE     Generate packages (bin+html) with given version
       --sky SKY             Skybox texture name
       --dump-sprites        Writes all sprites to a single image with their 16x16 tile overlay.
@@ -241,6 +242,12 @@ In-game result:
 ### Creating New Textures
 
 Edit the tileset picture using your favorite paint program. Make sure to use *only* colors from the game palette, save file.
+
+You can have multiple tilesets (one per map group) but sharing textures between tilesets is not supported. It is recommended to prefix texture names with map group name to avoid confusion. 
+
+Example:
+
+    E1_WALL
 
 From Slade, launch the texture editor:
 

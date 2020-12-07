@@ -1,13 +1,22 @@
 map E1M1 "Hangar"
 {
 	levelnum = 1
-	next = "E1M2"
+	next = "E1M3"
+	location = 20,100
 	music = 0
+	sky1 = "SKYBOX"
 }
 
-map E1M2 "Docks"
+map E1M3 "Test"
 {
-	levelnum = 2
+	levelnum = 3
 	next = "endgame"
 	music = 12
+	sky1 = "SKYBOX"
+	location = 40,95
+}
+
+gameinfo 
+{
+	credits = "gAME eNGINE:,@fsouchu"
 }
