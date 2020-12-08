@@ -979,8 +979,8 @@ function attach_plyr(thing,actor)
           -- slow mode: pico calls _update 2 times
           -- but button state is updated only on first frame
           -- skip button state check in this case (e.g. keep hud open)
-          if(_slow==0) _wp_hud=not (btn(6) or btn(6,1))
-          for i,k in pairs{0,3,1,2,❎} do
+          if(_slow==0) _wp_hud=not btn(6)
+          for i,k in pairs{0,3,1,2,🅾️} do
             if btnp(k) or btnp(k,1) then
               -- only switch if we have the weapon and it's not the current weapon
               _wp_hud,_btns=(wp_slot!=i and wp[i]) and wp_switch(i),{}
@@ -990,18 +990,19 @@ function attach_plyr(thing,actor)
           -- cursor: fwd+rotate
           -- cursor+x: weapon switch+rotate
           -- wasd: fwd+strafe
-          -- o: fire
+          -- x: fire
           -- direct mouse input?
-          if peek(0x5f80)==1 then
-            da+=(128-peek(0x5f81))/8
+          if stat(38)!=0 then
+            da+=stat(38)/8
             daf=0.2
-            poke(0x5f80,0)
-          elseif btn(❎) then
-            if(_btns[0]) dx=1
-            if(_btns[1]) dx=-1
           else
-            if(_btns[0]) da-=0.75
-            if(_btns[1]) da+=0.75
+            if btn(🅾️) then
+              if(_btns[0]) dx=1
+              if(_btns[1]) dx=-1
+            else
+              if(_btns[0]) da-=0.75
+              if(_btns[1]) da+=0.75
+            end
           end
 
           if(_btns[_btnup]) dz=1
@@ -1264,6 +1265,7 @@ function play_state()
       print(cpu,2,3,3)
       print(cpu,2,2,15)    
       ]]     
+      -- printb(stat(0),2,2,15)
     end
 end
 
@@ -1311,6 +1313,10 @@ end
 function _init()
   -- force gc
   stat(0)
+  -- mouse 
+  -- enable lock+button alias
+  poke(0x5f2d,7)
+
   cartdata(mod_name)
 
   -- exit menu entry
@@ -1361,6 +1367,7 @@ function _update()
   _update_state()
   -- capture video!
   if(peek(0x5f83)==1) poke(0x5f83,0) extcmd("video") 
+  
   _slow+=1
 end
 

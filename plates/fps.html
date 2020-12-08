@@ -216,10 +216,10 @@
 						}
 						if (abs(dy) > abs(dx) * 0.6) // vertical
 						{
-							// o button
-							if (dy < -deadzone) b |= 0x10;
 							// x button
-							if (dy > deadzone) b |= 0x20;
+							if (dy < -deadzone) b |= 0x20;
+							// o button
+							if (dy > deadzone) b |= 0x10;
 						}
 	
 						pico8_buttons[0] |= b;
@@ -227,35 +227,7 @@
 				}
 			}
 		}
-	
-		function track_mouse(e) {
-			// enable mouse reading
-			pico8_gpio[0] = 1;
-			// clamp value to -127/127
-			pico8_gpio[1] = 128 - Math.min(Math.max(-127,Math.round(e.movementX)),127);
-			pico8_gpio[2] = 128 - Math.min(Math.max(-127,Math.round(e.movementY)),127);
-		}
-	
-		function track_click(e, step) {
-			if (!p8_is_running) return;
-
-			// clear fire button
-			pico8_buttons[0] = 0;
-
-			// left (fire/ok)
-			if(e.buttons & 0x1) {
-				pico8_buttons[0] |= 0x10;
-			}
-			// right (open/cancel)
-			if(e.buttons & (0x2|0x8)) {
-				pico8_buttons[0] |= 0x20;
-			}
-			// middle
-			if(e.buttons & 0x4) {
-				pico8_buttons[0] |= 0x40;
-			}
-		}
-		
+			
 		// p8_update_layout_hash is used to decide when to update layout (expensive especially when part of a heavy page)
 		var p8_update_layout_hash = -1;
 		var last_windowed_container_height = 512;
@@ -564,26 +536,6 @@
 					// need to watch: https://www.chromestatus.com/feature/5723553087356928
 					canvas.requestPointerLock();					
 				});
-
-				// pointer lock event listeners
-				function lockChangeAlert() {
-					if (document.pointerLockElement === canvas ||
-							document.mozPointerLockElement === canvas) {
-						canvas.addEventListener("mousemove", track_mouse, false);
-						canvas.addEventListener("mousedown", function(event){ track_click(event, 0); });
-						canvas.addEventListener("mouseup", function(event){ track_click(event, 1); });
-					} else {
-						// reset mouse values
-						pico8_gpio[0]=0
-						pico8_gpio[1]=0
-						canvas.removeEventListener("mousemove", track_mouse, false);
-						// document.removeEventListener("click", function(event){ track_click(event, 0); }, false);
-					}
-				}	
-	
-				// Hook pointer lock state change events for different browsers
-				document.addEventListener('pointerlockchange', lockChangeAlert, false);
-				document.addEventListener('mozpointerlockchange', lockChangeAlert, false);
 			}
 			
 			// load and run script

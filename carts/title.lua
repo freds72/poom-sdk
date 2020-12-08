@@ -4,7 +4,7 @@ local snd="36530600324c000000000000000000000000000000000000000000000000000000000
 -- supports player 1 or player 2 input
 local _btnp=btnp
 function btnp(b)
-  return _btnp(b,0) or _btnp(b,1)
+  return _btnp(b,0) or _btnp(b,1) 
 end
 
 -- copy image text to spritesheet/memory
@@ -47,7 +47,7 @@ end
 
 -- intro screen
 function start_state()
-  local ttl=300
+  local ttl=300 
   -- reset saved state
   dset(0,-1)
 
@@ -101,19 +101,16 @@ function menu_state()
   return
     function()
       -- mouse?
-      if peek(0x5f80)==1 then
+      if stat(38)!=0 then
         mouse_ttl=30
-        mouse_x+=(128-peek(0x5f81))/2
-        mouse_y+=(128-peek(0x5f82))/2
-        mouse_x=mid(mouse_x,0,126)
-        mouse_y=mid(mouse_y,0,126)
+        mouse_x=mid(mouse_x+stat(38)/2,0,126)
+        mouse_y=mid(mouse_y+stat(39)/2,0,126)
       end
       if mouse_ttl>0 then
         mouse_ttl-=1
         -- reset control scheme if using mouse
         switch_scheme(0)
       end
-      poke(0x5f80,0)
 
       anm_ttl=(anm_ttl+1)%48
       if menu_i>0 then
@@ -141,10 +138,10 @@ function menu_state()
         menus[menu_i].sel=active_sel
       end
 
-      if btnp(❎) then
+      if btnp(🅾️) then
         if(menu_i>1)sfx(0)
         menu_i=max(1,menu_i-1)
-      elseif btnp(🅾️) then
+      elseif btnp(❎) then
         if(menu_i>0)sfx(1)
         menu_i+=1
         if menu_i>#menus then
@@ -336,7 +333,7 @@ function credits_state()
       end
       print(sp,64-#sp*2,80,15)
 
-      if(ttl>0 and time()%4<2) print("🅾️/❎\23MENU",44,122,15)
+      if(ttl>0 and time()%4<2) print("FIRE/USE\23MENU",38,122,15)
 
       pal(endgame_gfx.pal,1)      
     end,
@@ -382,7 +379,7 @@ end
 local _scheme=0
 function switch_scheme(scheme)
   local scheme_help={
-    {caption="keyboard mode 1",btnfire=🅾️,btnuse=❎,btndown=⬇️,btnup=⬆️,space=0x20},
+    {caption="keyboard mode 1",btnfire=❎,btnuse=🅾️,btndown=⬇️,btnup=⬆️,space=0x20},
     {caption="keyboard mode 2",btnfire=⬆️,btnuse=⬇️,btndown=7,btnup=7,space=0x8}
   }
   _scheme=scheme or ((_scheme+1)%2)
@@ -400,6 +397,9 @@ function switch_scheme(scheme)
 end
 
 function _init()
+  -- mouse suport
+  poke(0x5f2d, 7)
+
   cartdata(mod_name)
 
   -- control scheme
@@ -416,7 +416,7 @@ function _init()
   
   -- special case for end game state
   if(state==2 and mapid+1>#_maps_group) state=4
-  
+
   local states={
     -- default
     [0]={start_state},
