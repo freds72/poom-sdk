@@ -987,15 +987,15 @@ function attach_plyr(thing,actor)
             end
           end
         else
-          -- cursor: fwd+rotate
-          -- cursor+x: weapon switch+rotate
-          -- wasd: fwd+strafe
-          -- x: fire
           -- direct mouse input?
           if stat(38)!=0 then
             da+=stat(38)/8
             daf=0.2
           else
+            -- cursor: fwd+rotate
+            -- cursor+x: weapon switch+rotate
+            -- wasd: fwd+strafe
+            -- o: fire
             if btn(🅾️) then
               if(_btns[0]) dx=1
               if(_btns[1]) dx=-1
@@ -1169,9 +1169,10 @@ end
 --_max_cpu,_max_cpu_ttl=0,0
 
 function play_state()
+  _loading=true
+
   -- stop music (eg. restart game)
   music(-1)
-
   _actors,_sprite_cache=decompress(mod_name,0,0,unpack_actors)
 
   -- ammo scaling factor
@@ -1228,7 +1229,8 @@ function play_state()
 
   -- start level music (if any)
   music(_maps_music[_map_id],0,14)
-
+  _loading=nil
+  
   return 
     -- update
     function()
@@ -1570,7 +1572,7 @@ function unpack_actors()
     -- A_WeaponReady
     function(item)
       return function(owner,weapon)
-        if not _wp_hud and btn(_btnfire) then
+        if not _wp_hud and not _loading and btn(_btnfire) then
           local inventory,ammotype,newqty=owner.inventory,item.ammotype,0
           -- handle "fist" (eg weapon without ammotype)
           if(ammotype) newqty=inventory[ammotype]-item.ammouse
