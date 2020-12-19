@@ -210,14 +210,14 @@ function polyfill(v,xoffset,yoffset,tex,light)
     end
   end
 
-  local v0,spans,ca,sa,cx,cy,cz,pal0=v[#v],{},_cam.u,_cam.v,(_plyr[1]>>4)+xoffset,(-_cam.m[4]-yoffset)<<3,_plyr[2]>>4
-  local x0,w0=v0.x,v0.w
-  local y0=v0.y-yoffset*w0
+  local r0,spans,ca,sa,cx,cy,cz,pal0=v[#v],{},_cam.u,_cam.v,(_plyr[1]>>4)+xoffset,(-_cam.m[4]-yoffset)<<3,_plyr[2]>>4
+  local x0,w0=r0.x,r0.w
+  local y0,maxlight=r0.y-yoffset*w0,light\0.066666
   for i,v1 in ipairs(v) do
     local x1,w1=v1.x,v1.w
     local y1=v1.y-yoffset*w1
-    local _x1,_y1,_w1=x1,y1,w1
-    if(y0>y1) x1=x0 y1=y0 w1=w0 x0=_x1 y0=_y1 w0=_w1
+    local _y1=y1
+    if(y0>y1) x1=x0 y1=y0 w1=w0 x0=v1.x y0=_y1 w0=v1.w
     local dy=y1-y0
     local cy0,dx,dw=y0\1+1,(x1-x0)/dy,(w1-w0)/dy
     local sy=cy0-y0
@@ -231,19 +231,18 @@ function polyfill(v,xoffset,yoffset,tex,light)
       if span then
         -- limit visibility
         if w0>0.15 then
-          -- collect boundaries + color shitfint + mode 7
-          local wlight=w0<<5
-          if(wlight>15) wlight=15
-          local a,b,rz,pal1=x0,span,cy/(y-63.5),(light*wlight)\1
-          if(a>b) a=span b=x0
-          -- color shifing
-          if(pal0!=pal1) _memcpy(0x5f00,0x4300|pal1<<4,16) pal0=pal1
-
+          -- @farbs: use max brightness if span is close enough otherwise gradient
+          r0=w0>0.46875 and maxlight or (light*w0)\0.03125
+          if(pal0!=r0) _memcpy(0x5f00,0x4300|r0<<4,16) pal0=r0	-- color shift now to free up a variable
+          local rz=cy/(y-63.5)
+          if(x0>span) r0=x0 else r0=span span=x0
+		  
           -- mode7 texturing
-          local rx=rz*(a\1-63.5)>>7
+    		  local rz7=rz>>7
+          local rx=rz7*(span\1-63.5)
         
           -- camera space
-          _tline(a,y,b,y,ca*rx+sa*rz+cx,ca*rz-sa*rx+cz,ca*rz>>7,-sa*rz>>7)   
+          _tline(span,y,r0,y,ca*rx+sa*rz+cx,ca*rz-sa*rx+cz,ca*rz7,-sa*rz7)   
         end       
       else
         spans[y]=x0
@@ -252,9 +251,9 @@ function polyfill(v,xoffset,yoffset,tex,light)
       x0+=dx
       w0+=dw
     end		
-    x0=_x1
+    x0=v1.x
     y0=_y1
-    w0=_w1
+    w0=v1.w
   end  
 end
 
@@ -276,7 +275,6 @@ local function v_clip(v0,v1,t)
       seg=v0.seg
     }
 end
-
 -- ceil/floor/wall rendering
 function draw_flats(v_cache,segs)
   local verts,outcode,nearclip,px,py,m1,m3,m4,m8,m9,m11,m12={},0xffff,0,_plyr[1],_plyr[2],unpack(_cam.m)
@@ -338,8 +336,7 @@ function draw_flats(v_cache,segs)
       -- draw walls
       -- get heights
       local v0,top,bottom=verts[#verts],ceil>>4,floor>>4
-      local x0,y0,w0=v0.x,v0.y,v0.w
-    
+      local x0,y0,w0,maxlight=v0.x,v0.y,v0.w,light\0.066666
       for i,v1 in ipairs(verts) do
         local seg,x1,y1,w1=v0.seg,v1.x,v1.y,v1.w
         local _x1,ldef=x1,seg.line
@@ -373,30 +370,29 @@ function draw_flats(v_cache,segs)
             end
             -- span rasterization
             -- pick correct texture "major"
-            local dx,u0,midtex_tc=x1-x0,v0[seg[9]]*w0,_transparent_textures[midtex]
-            local cx0,dy,du,dw=x0\1+1,(y1-y0)/dx,(v1[seg[9]]*w1-u0)/dx,((w1-w0)<<4)/dx
+            local u0,midtex_tc,cx0=v0[seg[9]]*w0,_transparent_textures[midtex],x0\1+1
+            local dx,dy,du,dw=x1-x0,y1-y0,v1[seg[9]]*w1-u0,(w1-w0)<<4
             w0<<=4
-            local sx=cx0-x0    
-            if(x0<0) y0-=x0*dy u0-=x0*du w0-=x0*dw cx0=0 sx=0
-            y0+=sx*dy
-            u0+=sx*du
-            w0+=sx*dw
+            if(x0<0) cx0=0
             if(x1>127) x1=127
             for x=cx0,x1\1 do
-              if w0>2.4 then
+              -- lerp ratio
+              local xratio=(x-x0)/dx
+              -- @farbs: exact w value (e.g. no DDA) - fixes wobbling textures
+              local wc=w0+xratio*dw
+              if wc>2.4 then
                 -- top/bottom+perspective correct texture u+color shifing
-                local wlight=w0<<1
-                if(wlight>15) wlight=15
-                local t,b,u,pal1=y0-top*w0,y0-bottom*w0,u0/(w0>>4),(light*wlight)\1
+                local yc=y0+xratio*dy
+                local t,b,u,pal1=yc-top*wc,yc-bottom*wc,(u0+xratio*du)/(wc>>4),wc>7.5 and maxlight or (light*wc)\0.5
                 if(pal0!=pal1) memcpy(0x5f00,0x4300|pal1<<4,16) pal0=pal1
     
                 -- top wall side between current sector and back sector
                 local ct=t\1+1
-    
+                
                 if otop then
                   poke4(0x5f38,toptex)             
-                  local ot=y0-otop*w0
-                  tline(x,ct,x,ot,u,(ct-t)/w0+yoffsettop,0,1/w0)
+                  local ot=yc-otop*wc
+                  tline(x,ct,x,ot,u,(ct-t)/wc+yoffsettop,0,1/wc)
                   -- new window top
                   t=ot
                   ct=ot\1+1
@@ -404,9 +400,9 @@ function draw_flats(v_cache,segs)
                 -- bottom wall side between current sector and back sector     
                 if obottom then
                   poke4(0x5f38,bottomtex)             
-                  local ob=y0-obottom*w0
+                  local ob=yc-obottom*wc
                   local cob=ob\1+1
-                  tline(x,cob,x,b,u,(cob-ob)/w0,0,1/w0)
+                  tline(x,cob,x,b,u,(cob-ob)/wc,0,1/wc)
                   -- new window bottom
                   b=ob
                 end
@@ -417,13 +413,10 @@ function draw_flats(v_cache,segs)
                   poke4(0x5f38,midtex)
                   -- enable transparent black if needed
                   poke(0x5f00,midtex_tc)
-                  tline(x,ct,x,b,u,(ct-t)/w0+yoffset,0,1/w0)
+                  tline(x,ct,x,b,u,(ct-t)/wc+yoffset,0,1/wc)
                   poke(0x5f00,0)
                 end   
               end
-              y0+=dy
-              u0+=du
-              w0+=dw
             end
           end
         end
@@ -987,15 +980,15 @@ function attach_plyr(thing,actor)
             end
           end
         else
+          -- cursor: fwd+rotate
+          -- cursor+x: weapon switch+rotate
+          -- wasd: fwd+strafe
+          -- o: fire
           -- direct mouse input?
           if stat(38)!=0 then
-            da+=stat(38)/8
+            da+=stat(38)/_mouse_acc
             daf=0.2
           else
-            -- cursor: fwd+rotate
-            -- cursor+x: weapon switch+rotate
-            -- wasd: fwd+strafe
-            -- o: fire
             if btn(🅾️) then
               if(_btns[0]) dx=1
               if(_btns[1]) dx=-1
@@ -1330,7 +1323,7 @@ function _init()
   local p=split(stat(6))
   _skill,_map_id=tonum(p[1]) or 2,tonum(p[2]) or 1
   -- sky texture + load keyboard control mapping
-  _sky_height,_sky_offset,_btnfire,_btnuse,_btndown,_btnup=_maps_sky[_map_id*2-1],_maps_sky[_map_id*2],dget(35),dget(36),dget(37),dget(38)
+  _sky_height,_sky_offset,_btnfire,_btnuse,_btndown,_btnup,_mouse_acc=_maps_sky[_map_id*2-1],_maps_sky[_map_id*2],dget(35),dget(36),dget(37),dget(38),dget(39)
   -- skybox fill pattern
   fillp(0xaaaa)
 

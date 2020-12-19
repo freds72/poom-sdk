@@ -1,5 +1,52 @@
 -- background menu
 local snd="36530600324c00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000060100003e0c3fa445d819c0158b1589158515841583158215811381138003800380538000000000000000000000000000000000000000000000000000000000000000000301000"
+local schemes={
+  {caption="esdf+⬅️⬆️⬇️➡️\nfire\023❎ use\023🅾️",btnfire=❎,btnuse=🅾️,btndown=⬇️,btnup=⬆️,space=0x10},
+  {caption="esdf+⬅️➡️\nfire\023⬆️ use\023⬇️",btnfire=⬆️,btnuse=⬇️,btndown=7,btnup=7,space=0x8}
+}
+
+local leaderboard_pins,medals,leaderboard={
+  victory1=3,
+  victory2=4,
+  victory3=5,
+  victory4=6,  
+  map=7,
+  kills=8,
+  time=9,
+  -- todo: generate from mapinfo?
+  secrets1=13,
+  secrets2=14,
+  secrets3=15,
+  secrets4=16,
+  secrets5=17,
+  -- no secrets
+  secrets6=18,
+  -- total time
+  total_time=19,
+  -- todo: generate from mapinfo?
+  punch1=23,
+  punch2=24,
+  punch2=25,
+  punch2=26,
+  punch2=27,
+  punch2=28
+},{}
+
+function leaderboard_pack_fixed(key,value)
+  -- export a 16:16 number
+  poke4(0x5f80+leaderboard_pins[key],value)
+end
+
+function update_map_leaderboard(skill,id,level_time,total_time,kills,perfect_kills,perfect_secret)
+  -- update leaderboard (if any)
+  poke(0x5f80+leaderboard_pins.map,id)
+  -- assumes number of kills < 255!
+  poke(0x5f80+leaderboard_pins.kills,kills)
+  leaderboard_pack_fixed("time",level_time)
+  --
+  poke(0x5f80+leaderboard_pins["secrets"..id],perfect_secret and 1 or 0)
+  leaderboard_pack_fixed("total_time",total_time or 0)
+end
 
 -- supports player 1 or player 2 input
 local _btnp=btnp
@@ -27,7 +74,6 @@ function draw_gfx(src)
   spr(0,0,offset,16,16)
 end
 
-
 -- game states
 function next_state(fn,...)
   local u,d,i=fn(...)
@@ -41,7 +87,17 @@ function next_state(fn,...)
     u()
         
     -- gif capture handling
-    if(peek(0x5f83)==1) poke(0x5f83,0) extcmd("video") 
+    if(peek(0x5f81)==1) poke(0x5f81,0) extcmd("video") 
+
+    -- leaderboard?
+    if not leaderboard and peek(0x5f82)>0 then
+      -- medals status
+      for i=0,peek(0x5f82)-1 do
+        medals[i]=peek(0x5f83+i)
+      end
+      -- enable
+      leaderboard=true
+    end
   end
 end
 
@@ -50,6 +106,15 @@ function start_state()
   local ttl=300 
   -- reset saved state
   dset(0,-1)
+  -- reserved:
+  -- 0: save
+  -- 1-13: health+armor+weapons+ammo
+  -- 17-23: level time
+  for i=1,#_maps_group do
+    dset(16+i,0)
+  end
+  -- clear gpio (for leaderboard)
+  memset(0x5f83,0,32)
 
   return
     -- update
@@ -67,91 +132,164 @@ function start_state()
       printb("@fsouchu",2,121,vcol(4))
       printb("@gamecactus",83,121,vcol(4))
 
+      -- display leaderboard activation
+      if(leaderboard) printb("★",1,1,vcol(14),vcol(13))
+
       pal(title_gfx.pal,1)
     end,
     -- init
     function()
-      -- reset any bitplane masking
-      poke(0x5f5e,0xff)
-
       unpack_gfx(title_gfx)
     end  
 end
 
 function menu_state()
   local mouse_ttl,mouse_x,mouse_y=0,0,0
-  local menus,menu_i,anm_ttl={
-    {"wHICH ePISODE?",_maps_label,sel=1,max=1},
-    {"sELECT sKILL lEVEL",
-    {
-      "i AM TOO YOUNG TO DIE",
-      "hEY, NOT TOO ROUGH",
-      "hURT ME PLENTY",
-      "uLTRA-vIOLENCE"
-    },sel=2,max=2}},1,0
+  local anm_ttl,menus=0
+  -- restore mouse acceleration
+  local mouse_acc,keyboard_mode=mid(dget(39)\4,1,8),mid(dget(34),0,1)
+
+  menus={
+    select={
+      title="sELECT",
+      entries={"nEW gAME","cONTROLS"},
+      sel=1,
+      max=2,
+      next=function(menus,sel)
+        if(sel==1) return menus.levels
+        return menus.controls
+      end
+    },
+    controls={
+      title="cONTROL oPTIONS",
+      entries={
+        function()
+          if mouse_ttl>0 then
+            return "esdf+mouse:\nfire\023lmb use\023rmb"
+          end
+          return schemes[keyboard_mode+1].caption
+        end,
+        function() 
+          local bar="\nfast"
+          for i=1,8 do
+            if i==mouse_acc then
+              bar=bar.."▮"
+            else
+              bar=bar.."-"
+            end
+          end
+          return "mouse sensitivity"..bar.."slow" end
+      },
+      height=14,
+      sel=1,
+      max=2,
+      back="select",
+      next=function(menus,sel)
+        if sel==1 and mouse_ttl==0 then
+          keyboard_mode+=1
+          if(keyboard_mode>1) keyboard_mode=0
+          switch_scheme(keyboard_mode)        
+        elseif sel==2 then
+          mouse_acc+=1
+          if(mouse_acc>8) mouse_acc=1
+          dset(39,mouse_acc*4)
+        end
+        -- stay on menu
+        return menus.controls
+      end
+    },    
+    levels={
+      title="wHICH ePISODE?",
+      entries=_maps_label,
+      sel=1,
+      max=1,
+      back="select",
+      next="skills"
+    },
+    skills={
+      title="sELECT sKILL lEVEL",
+      entries={
+        "i AM TOO YOUNG TO DIE",
+        "hEY, NOT TOO ROUGH",
+        "hURT ME PLENTY",
+        "uLTRA-vIOLENCE"
+      },
+      sel=2,
+      max=4,
+      back="levels",
+      next=function(menus)
+        next_state(launch_state,menus.skills.sel,menus.levels.sel)     
+      end}
+    },0
 
   -- read max level reached
   local max_map_id=dget(32)
   if(max_map_id>#_maps_label) max_map_id=#_maps_label dset(32,max_map_id)
   if(max_map_id<=0) max_map_id=1 dset(32,max_map_id)
 
-  menus[1].max=max_map_id
-  menus[2].max=#menus[2][2]
+  menus.levels.max=max_map_id
+
+  local active_menu=menus.select
 
   return
     function()
       -- mouse?
       if stat(38)!=0 then
         mouse_ttl=30
-        mouse_x=mid(mouse_x+stat(38)/2,0,126)
-        mouse_y=mid(mouse_y+stat(39)/2,0,126)
+        mouse_x=mid(mouse_x+stat(38)/mouse_acc,0,126)
+        mouse_y=mid(mouse_y+stat(39)/mouse_acc,0,126)
       end
       if mouse_ttl>0 then
-        mouse_ttl-=1
-        -- reset control scheme if using mouse
+        mouse_ttl-=1        
         switch_scheme(0)
       end
 
       anm_ttl=(anm_ttl+1)%48
-      if menu_i>0 then
-        local active_sel=menus[menu_i].sel
-        if mouse_ttl>0 then
-          local prev_sel=active_sel
-          for i=1,#menus[menu_i][2] do
-            if i<=menus[menu_i].max and mouse_y>69+i*8 and mouse_y<=75+i*8 then
-              active_sel=i
-            end
-          end   
-          if(prev_sel!=active_sel) sfx(0)
-        else
-          if btnp(2) then
-            active_sel-=1
-            sfx(0)
+      local active_sel,height=active_menu.sel,active_menu.height or 8
+      if mouse_ttl>0 then
+        local prev_sel=active_sel
+        for i=1,#active_menu.entries do
+          if i<=active_menu.max and mouse_y>69+i*height and mouse_y<=75+i*height then
+            active_sel=i
           end
-          if btnp(3) then
-            active_sel+=1
-            sfx(0)
-          end
-          -- unlocked?
-          active_sel=mid(active_sel,1,menus[menu_i].max)
+        end   
+        if(prev_sel!=active_sel) sfx(0)
+      else
+        if btnp(2) then
+          active_sel-=1
+          sfx(0)
         end
-        menus[menu_i].sel=active_sel
+        if btnp(3) then
+          active_sel+=1
+          sfx(0)
+        end
+        -- unlocked?
+        active_sel=mid(active_sel,1,active_menu.max)
       end
+      active_menu.sel=active_sel
 
       if btnp(🅾️) then
-        if(menu_i>1)sfx(0)
-        menu_i=max(1,menu_i-1)
-      elseif btnp(❎) then
-        if(menu_i>0)sfx(1)
-        menu_i+=1
-        if menu_i>#menus then
-          next_state(launch_state,menus[2].sel,menus[1].sel)
+        -- cancel
+        if active_menu.back then
+          sfx(0)
+          active_menu=menus[active_menu.back]        
         end
+      elseif btnp(❎) then
+        if active_menu.next then
+          sfx(1)
+          local next_menu=menus[active_menu.next]
+          if next_menu then
+            active_menu=next_menu
+          else
+            -- function?
+            active_menu=active_menu.next(menus,active_sel)
+          end
+        end        
       end
     end,
     function()
       -- exit early because state will have been change to launch_state
-      if (menu_i>#menus)return
+      if (not active_menu)return
 
       cls()
       draw_gfx(title_gfx)
@@ -163,25 +301,37 @@ function menu_state()
         pal(vcol(i),sget(112+i,128-11))
         --pset(i,0,i)
       end
+      local height=active_menu.height or 8
       palt(0,false)
-      sspr(12,52,104,15+#menus[menu_i][2]*8,12,64)
+      sspr(12,52,104,15+#active_menu.entries*height,12,64)
       pal()
       
       -- title
-      printb(menus[menu_i][1],63-#menus[menu_i][1]*2,67,vcol(14))
+      printb(active_menu.title,63-#active_menu.title*2,67,vcol(14))
 
       -- selection marker
-      rectfill(18,68+menus[menu_i].sel*8,113,75+menus[menu_i].sel*8,vcol(2))
+      rectfill(18,76+(active_menu.sel-1)*height,113,75+active_menu.sel*height,vcol(2))
       palt(vcol(0),false)
       palt(vcol(4),true)
-      sspr(anm_ttl\12*10,116,11,12,14,65+menus[menu_i].sel*8)
+      sspr(anm_ttl\12*10,116,11,12,14,74+(active_menu.sel-1)*height)
       palt()
 
-      -- menu items
-      for i=1,#menus[menu_i][2] do
-        local s=menus[menu_i][2][i]
-        if(i>menus[menu_i].max) s=masked(s)
-        printb(s,28,69+i*8,i<=menus[menu_i].max and vcol(4) or vcol(3))
+      -- menu items      
+      for i=1,#active_menu.entries do
+        local s=active_menu.entries[i]
+        if(type(s)=="function") s=s()
+        if(i>active_menu.max) s=masked(s)
+        printb(s,28,77+(i-1)*height,i<=active_menu.max and vcol(4) or vcol(3))
+        local hs=""
+        for j=1,#s do
+          local c=sub(s,j,j)
+          if c=="🅾️" or c=="❎" or c=="⬅️" or c=="⬆️" or c=="⬇️" or c=="➡️" or c=="▮" or c=="\n" then
+            hs=hs..c
+          else
+            hs=hs.." "
+          end
+        end
+        printb(hs,28,77+(i-1)*height,i<=active_menu.max and vcol(13) or vcol(3))
       end
       
       if(mouse_ttl>0) palt(vcol(4),true) sspr(41,116,10,10,mouse_x,mouse_y) palt()
@@ -225,6 +375,10 @@ function stats_state(skill,id,level_time,kills,monsters,secrets,all_secrets)
     all_secrets>0 and "secrets: "..secrets.."/"..all_secrets or nil
   }
 
+  -- record per level play time
+  dset(16+id,level_time)
+  update_map_leaderboard(skill,id,level_time,nil,kills,kills==monsters,secrets==all_secrets)
+
   return
     function()
       if ttl>600 or btnp(4) or btnp(5) then
@@ -248,7 +402,7 @@ function stats_state(skill,id,level_time,kills,monsters,secrets,all_secrets)
     end
 end
 
-function launch_state(skill,id,level_time,kills,secrets)
+function launch_state(skill,id)
   -- record max level reached so far
   if(id>dget(32)) dset(32,id)
   return
@@ -290,9 +444,21 @@ function launch_state(skill,id,level_time,kills,secrets)
     end
 end
 
-
-function credits_state()  
+function credits_state(skill,id,level_time,kills,monsters,secrets,all_secrets)  
   local ttl,t,creditsi=0,{},0
+
+  -- update leaderboard (if any)
+  poke(0x5f83+leaderboard_pins["victory"..skill],1)
+
+  local total_time=level_time
+  for i=1,id-1 do
+    local t=dget(16+i)
+    -- not a full run?
+    if(t==0) total_time=nil break
+    total_time+=t
+  end
+  update_map_leaderboard(skill,id,level_time,total_time,kills,kills==monsters,secrets==all_secrets)
+
   return
     -- update
     function()
@@ -376,24 +542,18 @@ function slicefade_state(...)
       memcpy(0x0,0x6000,8192)
     end
 end
-local _scheme=0
+
 function switch_scheme(scheme)
-  local scheme_help={
-    {caption="keyboard mode 1",btnfire=❎,btnuse=🅾️,btndown=⬇️,btnup=⬆️,space=0x20},
-    {caption="keyboard mode 2",btnfire=⬆️,btnuse=⬇️,btndown=7,btnup=7,space=0x8}
-  }
-  _scheme=scheme or ((_scheme+1)%2)
-  local s=scheme_help[_scheme+1]
-  menuitem(1,s.caption,switch_scheme)
+  local s=schemes[scheme+1]
   -- save scheme
-  dset(34,_scheme)
+  dset(34,scheme)
   dset(35,s.btnfire)
   dset(36,s.btnuse)
   dset(37,s.btndown)
   dset(38,s.btnup)
 
   -- export via gpio
-  poke(0x5f83,s.space)
+  poke(0x5f80,s.space)
 end
 
 function _init()
@@ -401,7 +561,9 @@ function _init()
   poke(0x5f2d, 7)
 
   cartdata(mod_name)
-
+  -- default sensititivity
+  if(dget(39)==0) dset(39,8)
+  
   -- control scheme
   switch_scheme(dget(34))
 
@@ -427,7 +589,7 @@ function _init()
     -- 3: retry
     {slicefade_state,launch_state,skill,mapid},    
     -- 4: end game
-    {fadetoblack_state,credits_state}
+    {fadetoblack_state,credits_state,skill,mapid,level_time,kills,monsters,secrets,_secrets[mapid]}
   }
 
   -- wait time before launching (15 frames when loading from menu to prevent audio from getting cut too short)
