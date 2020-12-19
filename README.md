@@ -82,10 +82,12 @@ python -m wad_reader --pico-home d:\pico-8_0.2.0 --carts-path carts --mod-name p
 
 4. Launch game:
 ```shell
-pico8 -home <path to repo> poom.p8
+pico8 -home <path to repo> poom_0.p8
 ```
 
 # Controls
+
+Note: mouse support requires Pico8 version 0.2.2+, not yet officially out at the time of writing.
 
 ## Player 1 keys
 
@@ -118,7 +120,7 @@ pause: regular pico-8 pause menu
 # Make a Game!
 ## Level Building
 
-The toolkit supports file-based DOOM archive only.
+The toolkit supports folder-based DOOM archive only.
 
 Archive structure:
 * :file_folder: maps/ contains levels WAD files
