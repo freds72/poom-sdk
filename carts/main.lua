@@ -1,5 +1,5 @@
 -- globals
-local _slow,_ambientlight,_drag,_ammo_factor,_intersectid,_onoff_textures,_transparent_textures,_futures,_things,_btns,_bsp,_cam,_plyr,_sprite_cache,_actors,_wp_hud,_msg=0,0,0,1,0,{[0]=0},{},{},{},{}
+local _ammoused,_slow,_ambientlight,_drag,_ammo_factor,_intersectid,_onoff_textures,_transparent_textures,_futures,_things,_btns,_bsp,_cam,_plyr,_sprite_cache,_actors,_wp_hud,_msg=0,0,0,0,1,0,{[0]=0},{},{},{},{}
 
 --local k_far,k_near=0,2
 --local k_right,k_left=4,8
@@ -76,12 +76,12 @@ end
 function vspr(frame,sx,sy,scale,flipx)
   -- faster equivalent to: palt(0,false)
   poke(0x5f00,0)
-  local xscale,w,xoffset,yoffset,tc,tiles=scale,unpack(frame)
-  palt(tc,true)
+  local xscale,w,xoffset=scale,frame[1],frame[2]
+  palt(frame[4],true)
   if(flipx) xoffset,xscale=1-xoffset,-scale
   sx-=xoffset*scale
-  sy-=yoffset*scale
-	for i,tile in pairs(tiles) do
+  sy-=frame[3]*scale
+	for i,tile in pairs(frame[5]) do
     local dx,dy,ssx,ssy=sx+(i%w)*xscale,sy+(i\w)*scale,_sprite_cache:use(tile)
     -- scale sub-pixel fix 
     sspr(ssx,ssy,16,16,dx,dy,scale+dx%1,scale+dy%1,flipx)
@@ -96,7 +96,7 @@ function make_sprite_cache(tiles)
   -- for j=0,31 do
   --   poke4(mem|(j&1)<<2|(j\2)<<6,tiles[id+j])
   -- end	
-	local len,index,offsets,first,last=0,{},split("4,64,68,128,132,192,196,256,260,320,324,384,388,448,452,512,516,576,580,640,644,704,708,768,772,832,836,896,900,960,964",",",1)
+	local len,index,offsets,first,last=0,{},split"4,64,68,128,132,192,196,256,260,320,324,384,388,448,452,512,516,576,580,640,644,704,708,768,772,832,836,896,900,960,964"
   offsets[0]=0
 
   local function remove(t)
@@ -199,25 +199,25 @@ end
 -- xoffset: used as texture offset
 -- yoffset: height
 -- if tex is 0: renders skybox gradient
+function nop() end
 function polyfill(v,xoffset,yoffset,tex,light)
   poke4(0x5f38,tex)
   local _tline,_memcpy=tline,memcpy
   if tex==0 then
     pal()
-    _memcpy,_tline=peek,function(x0,y0,x1) 
+    _memcpy,_tline=nop,function(x0,y0,x1) 
       if(y0>_sky_height) y0=_sky_height
       rectfill(x0,y0,x1,y0,@(_sky_offset+y0))
     end
   end
 
-  local r0,spans,ca,sa,cx,cy,cz,pal0=v[#v],{},_cam.u,_cam.v,(_plyr[1]>>4)+xoffset,(-_cam.m[4]-yoffset)<<3,_plyr[2]>>4
-  local x0,w0=r0.x,r0.w
-  local y0,maxlight=r0.y-yoffset*w0,light\0.066666
-  for i,v1 in ipairs(v) do
-    local x1,w1=v1.x,v1.w
-    local y1=v1.y-yoffset*w1
-    local _y1=y1
-    if(y0>y1) x1=x0 y1=y0 w1=w0 x0=v1.x y0=_y1 w0=v1.w
+  local nverts,spans,ca,sa,cx,cy,cz,pal0=#v,{},_cam.u,_cam.v,(_plyr[1]>>4)+xoffset,(-_cam.m[4]-yoffset)<<3,_plyr[2]>>4
+  local maxlight=light\0.066666
+  for i,r0 in pairs(v) do
+    local v1=v[i%nverts+1] 
+    local x0,w0,x1,w1=r0.x,r0.w,v1.x,v1.w
+    local y0,y1=r0.y-yoffset*w0,v1.y-yoffset*w1
+    if(y0>y1) x1=x0 w1=w0 x0=v1.x y0,y1=y1,y0 w0=v1.w
     local dy=y1-y0
     local cy0,dx,dw=y0\1+1,(x1-x0)/dy,(w1-w0)/dy
     local sy=cy0-y0
@@ -251,9 +251,6 @@ function polyfill(v,xoffset,yoffset,tex,light)
       x0+=dx
       w0+=dw
     end		
-    x0=v1.x
-    y0=_y1
-    w0=v1.w
   end  
 end
 
@@ -312,13 +309,10 @@ function draw_flats(v_cache,segs)
       local res,v0={},verts[#verts]
       local d0=v0.zz-8
       for i,v1 in ipairs(verts) do
+        local side=d0>0
+        if(side) res[#res+1]=v0
         local d1=v1.zz-8
-        if d1>0 then
-          if d0<=0 then
-            res[#res+1]=v_clip(v0,v1,d0/(d0-d1))
-          end
-          res[#res+1]=v1
-        elseif d0>0 then
+        if (d1>0)!=side then
           res[#res+1]=v_clip(v0,v1,d0/(d0-d1))
         end
         v0,d0=v1,d1
@@ -335,16 +329,18 @@ function draw_flats(v_cache,segs)
 
       -- draw walls
       -- get heights
-      local v0,top,bottom=verts[#verts],ceil>>4,floor>>4
-      local x0,y0,w0,maxlight=v0.x,v0.y,v0.w,light\0.066666
-      for i,v1 in ipairs(verts) do
-        local seg,x1,y1,w1=v0.seg,v1.x,v1.y,v1.w
-        local _x1,ldef=x1,seg.line
+      local nverts,top,bottom=#verts,ceil>>4,floor>>4
+      local maxlight=light\0.066666
+      for i,v0 in ipairs(verts) do
+        local v1=verts[i%nverts+1]
+        local seg,x0,y0,w0,x1,y1,w1=v0.seg,v0.x,v0.y,v0.w,v1.x,v1.y,v1.w
+        local ldef=seg.line
         -- logical split or wall?
         -- front facing?
         if x0<x1 and ldef then
           -- peg bottom?
-          local _,toptex,midtex,bottomtex=unpack(ldef[seg.side])
+          local linedef=ldef[seg.side]
+          local toptex,midtex,bottomtex=linedef[2],linedef[3],linedef[4]
           -- no need to draw untextured walls
           if toptex|midtex|bottomtex!=0 then
             -- get other side (if any)
@@ -420,49 +416,10 @@ function draw_flats(v_cache,segs)
             end
           end
         end
-        v0=v1
-        x0=_x1
-        y0=y1
-        w0=w1
       end
 
       -- draw things (if any) in this convex space
-      for thing,_ in pairs(segs.things) do
-        -- todo: cache thing projection
-        -- done: not sure if faster (90% of things are single sub-sector...)
-        --[[        
-        local v=v_cache[thing]
-        if not v then
-          local x,y=thing[1],thing[2]
-          local ax,az=m1*x+m3*y+m4,m9*x+m11*y+m12
-          -- todo: take radius into account 
-          if az>8 and az<854 and ax<az and -ax<az then
-            -- h: thing offset+cam offset
-            local w,h=128/az,thing[3]+m8
-            local x,y=63.5+ax*w,63.5-h*w
-            -- visible
-            v={x=x,y=y,w=w}
-          else
-            v={}
-          end
-          v_cache[thing]=v
-        end
-        -- visible?
-        local w=v.w
-        if w then
-          -- get start of linked list
-          local head=things[1]
-          -- empty list case
-          local prev=head
-          while head and head.w<w do
-            -- swap/advance
-            prev,head=head,head.next
-          end
-          -- insert new thing
-          prev.next={thing=thing,x=v.x,y=v.y,w=w,next=prev.next}
-        end
-      end          
-      ]]
+      for thing in pairs(segs.things) do        
         local x,y=thing[1],thing[2]
         local ax,az=m1*x+m3*y+m4,m9*x+m11*y+m12
         -- todo: take radius into account 
@@ -479,23 +436,23 @@ function draw_flats(v_cache,segs)
       end
       -- things are sorted, draw them
       for _,head in ipairs(things) do
-        local w0,thing,x0,y0=unpack(head)
+        local w0,thing=head[1],head[2]
         -- get image from current state
         local frame=thing.state
-        local side,_,flipx,bright,sides=0,unpack(frame)
+        local side,flipx,sides=0,frame[2],frame[4]
         -- use frame brightness level
-        local pal1=bright and 8 or (light*min(15,w0<<5))\1
+        local pal1=frame[3] and 8 or (light*min(15,w0<<5))\1
         if(pal0!=pal1) memcpy(0x5f00,0x4300|pal1<<4,16) pal0=pal1            
         -- pick side (if any)
         if sides>1 then
-          local angle=((atan2(px-thing[1],thing[2]-py)-thing.angle+0.0625)%1+1)%1
+          local angle=((atan2(px-thing[1],thing[2]-py)-thing.angle+0.0625)+1)%1
           side=(sides*angle)\1
           -- get flip bit from mask
           flipx=flipx&(1<<side)!=0
         else
           flipx=nil
         end
-        vspr(frame[side+5],x0,y0,w0<<5,flipx)
+        vspr(frame[side+5],head[3],head[4],w0<<5,flipx)
         
         -- thing:draw_vm(x0,y0)
         -- print(thing.angle,x0,y0,8)
@@ -516,7 +473,7 @@ function del_thing(thing)
 end
 
 function unregister_thing_subs(thing)
-  for node,_ in pairs(thing.subs) do
+  for node in pairs(thing.subs) do
     if(node.things) node.things[thing]=nil
     -- remove self from sectors (multiple)
     if(thing.actor.is_solid) node.sector.things-=1
@@ -557,7 +514,7 @@ function intersect_sub_sector(segs,p,d,tmin,tmax,radius,intersect_cb,skipthings)
 
   if not skipthings then
     local hits={}
-    for thing,_ in pairs(segs.things) do
+    for thing in pairs(segs.things) do
       -- not already "hit"
       -- not a missile
       -- not dead
@@ -582,7 +539,7 @@ function intersect_sub_sector(segs,p,d,tmin,tmax,radius,intersect_cb,skipthings)
                 if(t<hits[i].t) thingi=i break
               end
               -- insert new thing
-              add(hits,{ti=t,t=(radius-t)/radius,thing=thing},thingi)
+              add(hits,{ti=t,t=1-t/radius,thing=thing},thingi)
             end
           end
         end
@@ -905,7 +862,7 @@ function with_health(thing)
 
       -- avoid automatic infight
       -- + override when player
-      if(self==_plyr or instigator==_plyr or rnd()>0.8) self.target=instigator
+      if(self==_plyr or instigator==_plyr or rnd()>0.75) self.target=instigator
 
       -- damage reduction?
       local hp,armor=dmg,self.armor or 0
@@ -945,18 +902,21 @@ function with_health(thing)
 end
 
 function attach_plyr(thing,actor)
-  local bobx,boby,speed,da,wp,wp_slot,wp_yoffset,wp_y,hit_ttl,dmg_factor,wp_switching=0,0,actor.speed,0,thing.weapons,thing.active_slot,0,0,0,pack(0.5,1,1,2)[_skill]
+  local bobx,boby,speed,da,wp,wp_slot,wp_yoffset,wp_y,hit_ttl,dmg_factor,wp_switching=0,0,actor.speed,0,thing.weapons,thing.active_slot,0,0,0,split"0.5,1,1,2"[_skill]
 
   local function wp_switch(slot)
     if(wp_switching) return
-    wp_switching=true
-    do_async(function()
-      wp_yoffset=-32
-      wait_async(15)
-      wp_slot,wp_yoffset=slot,0
-      wait_async(15)
-      wp_switching=nil
-    end)
+    -- not already selected + valid weapon?
+    if wp_slot!=slot and wp[slot] then    
+      wp_switching=true
+      do_async(function()
+        wp_yoffset=-32
+        wait_async(15)
+        wp_slot,wp_yoffset=slot,0
+        wait_async(15)
+        wp_switching=nil
+      end)
+    end
   end
 
   return inherit({
@@ -976,19 +936,19 @@ function attach_plyr(thing,actor)
           for i,k in pairs{0,3,1,2,🅾️} do
             if btnp(k) or btnp(k,1) then
               -- only switch if we have the weapon and it's not the current weapon
-              _wp_hud,_btns=(wp_slot!=i and wp[i]) and wp_switch(i),{}
+              _wp_hud,_btns=wp_switch(i),{}
             end
           end
         else
-          -- cursor: fwd+rotate
-          -- cursor+x: weapon switch+rotate
-          -- wasd: fwd+strafe
-          -- o: fire
           -- direct mouse input?
           if stat(38)!=0 then
             da+=stat(38)/_mouse_acc
             daf=0.2
           else
+            -- cursor: fwd+rotate
+            -- cursor+x: weapon switch+rotate
+            -- wasd: fwd+strafe
+            -- o: fire
             if btn(🅾️) then
               if(_btns[0]) dx=1
               if(_btns[1]) dx=-1
@@ -1009,6 +969,11 @@ function attach_plyr(thing,actor)
           if(_btns[0x11]) dx=-1
           if(_btns[0x12]) dz=1
           if(_btns[0x13]) dz=-1
+
+          -- direct weapon selection (via keyboard)?
+          for i=1,5 do
+            if(stat(28,29+i)) wp_switch(i) break
+          end
         end
 
         self.angle-=da/256
@@ -1058,8 +1023,8 @@ function attach_plyr(thing,actor)
       pal()
       local ammotype=active_wp.actor.ammotype
       if(ammotype) printb(ammotype.icon..self.inventory[ammotype],106,120,9)
-      printb("♥"..self.health,2,110,12)
-      printb("웃"..self.armor,2,120,3)
+      ?"♥"..self.health,2,110,12
+      ?"웃"..self.armor,2,120,3
 
       -- keys
       for item,amount in pairs(self.inventory) do
@@ -1084,9 +1049,9 @@ function attach_plyr(thing,actor)
       memcpy(0x5f10,0x4400|hit_ttl<<4,16)
     end,
     hit=function(self,dmg,...)
-      -- call parent function
-      -- + skill adjustment
-      local hp=thing.hit(self,dmg_factor*dmg,...)
+      -- call parent function      
+      -- + skill adjustment      
+      local hp=thing:hit(dmg_factor*dmg,...)
       -- hp can be null if actor is dead
       if hp and hp>0 then
         hit_ttl=min(ceil(hp),15)
@@ -1215,8 +1180,9 @@ function play_state()
         if(ax>az) code|=4
         if(-ax>az) code|=8
         outcode&=code
+        -- early exit?
+        if(outcode==0) return true
       end
-      return outcode==0
     end
   }
 
@@ -1229,7 +1195,7 @@ function play_state()
     function()
       -- must be done after load to not register unpacking time!
       if(not _start_time) _start_time=time()
-
+      
       if _plyr.dead then
         next_state(gameover_state,_plyr,_plyr.angle,_plyr.target,45)
       end
@@ -1274,7 +1240,7 @@ function gameover_state(pos,angle,target,h)
       -- track 'death' instigator
       if target then
         target_angle=atan2(-target[1]+pos[1],target[2]-pos[2])+0.5
-        angle=lerp(shortest_angle(target_angle,angle),target_angle,0.08)
+        angle=lerp(shortest_angle(target_angle,angle),target_angle,0.2)
       end
       _cam:track(pos,angle,pos[3]+h)
       
@@ -1308,10 +1274,10 @@ end
 function _init()
   -- force gc
   stat(0)
-  -- mouse 
-  -- enable lock+button alias
-  poke(0x5f2d,7)
 
+  -- mouse 
+  -- enable lock+button alias+raw scan codes
+  poke(0x5f2d,7)
   cartdata(mod_name)
 
   -- exit menu entry
@@ -1329,14 +1295,41 @@ function _init()
 
   next_state(play_state)
 end
+--_btn,_wasd=btn,split"4,7,26,22"
+--btn=function(i,p) 
+--  if p==1 then
+--    return stat(28,_wasd[i+1])
+--  end
+--  return _btn(i,p)
+--end
+--_pressed={}
+--_thisframe={}
+--btnp=function(i,p)
+--  p=p or 0
+--  local k=i|p<<4
+--  if(_thisframe[k]!=nil) return _thisframe[k]
+--
+--  local prev,b=_pressed[k],btn(i,p)
+--  _pressed[k]=b
+--  local res=b and not prev
+--  _thisframe[k]=res
+--  return res
+--end
 
 function _update()
   -- get btn states and suppress pressed buttons until btnp occurs  
-  for p,mask in pairs{[0]=0,0x10} do
+  for p=0,1 do
     for i=0,5 do
-      _btns[mask|i]=btnp(i,p) or _btns[mask|i] and btn(i,p)
+      local id=i|p<<4
+      _btns[id]=btnp(i,p) or _btns[id] and btn(i,p)      
     end
   end
+  -- keyboard
+  -- _btns[0x20]=nil
+  -- raw scan codes ("1":30,"2":31...)
+  --for k=30,34 do
+  --  if(stat(28,k)) _btns[0x20]=(k-29) break
+  --end
 
   -- any futures?
   for i=#_futures,1,-1 do
@@ -1360,8 +1353,6 @@ function _update()
   end
 
   _update_state()
-  -- capture video!
-  if(peek(0x5f83)==1) poke(0x5f83,0) extcmd("video") 
   
   _slow+=1
 end
@@ -1373,7 +1364,7 @@ function unpack_variant()
 	local h=mpeek()
 	-- above 127?
   if h&0x80>0 then
-    h=(h&0x7f)<<8|mpeek()
+    return (h&0x7f)<<8|mpeek()
   end
 	return h
 end
@@ -1497,7 +1488,7 @@ function unpack_special(sectors)
       do_async(function()
         wait_async(delay)
         -- record level completion time + send stats
-        load(title_cart,nil,_skill..",".._map_id..",2,"..t..",".._kills..",".._monsters..",".._secrets)
+        load(title_cart,nil,_skill..",".._map_id..",2,"..t..",".._kills..",".._monsters..",".._secrets..",".._ammoused)
       end)
     end
   end
@@ -1511,7 +1502,7 @@ function unpack_actors()
     -- width/transparent color
     -- xoffset/yoffset in tiles unit (16x16)
     local wtc=mpeek()
-		local frame=add(frames,{wtc&0xf,(mpeek()-128)/16,(mpeek()-128)/16,flr(wtc>>4),{}})
+		local frame=add(frames,{wtc&0xf,(mpeek()-128)/16,(mpeek()-128)/16,wtc\16,{}})
 		unpack_array(function()
 			-- tiles index
 			frame[5][mpeek()]=unpack_variant()
@@ -1527,7 +1518,7 @@ function unpack_actors()
 
   -- inventory & things
   -- actor properties + skill ammo factor
-  local properties_factory=split("0x0.0001,health,unpack_variant,0x0.0002,armor,unpack_variant,0x0.0004,amount,unpack_variant,0x0.0008,maxamount,unpack_variant,0x0.0010,icon,unpack_chr,0x0.0020,slot,mpeek,0x0.0040,ammouse,unpack_variant,0x0.0080,speed,unpack_variant,0x0.0100,damage,unpack_variant,0x0.0200,ammotype,unpack_ref,0x0.0800,mass,unpack_variant,0x0.1000,pickupsound,unpack_variant,0x0.2000,attacksound,unpack_variant,0x0.4000,hudcolor,unpack_variant,0x0.8000,deathsound,unpack_variant,0x1,meleerange,unpack_variant,0x2,maxtargetrange,unpack_variant,0x4,ammogive,unpack_variant,0x8,trailtype,unpack_ref,0x10,drag,unpack_fixed",",",1)
+  local properties_factory=split"0x0.0001,health,unpack_variant,0x0.0002,armor,unpack_variant,0x0.0004,amount,unpack_variant,0x0.0008,maxamount,unpack_variant,0x0.0010,icon,unpack_chr,0x0.0020,slot,mpeek,0x0.0040,ammouse,unpack_variant,0x0.0080,speed,unpack_variant,0x0.0100,damage,unpack_variant,0x0.0200,ammotype,unpack_ref,0x0.0800,mass,unpack_variant,0x0.1000,pickupsound,unpack_variant,0x0.2000,attacksound,unpack_variant,0x0.4000,hudcolor,unpack_variant,0x0.8000,deathsound,unpack_variant,0x1,meleerange,unpack_variant,0x2,maxtargetrange,unpack_variant,0x4,ammogive,unpack_variant,0x8,trailtype,unpack_ref,0x10,drag,unpack_fixed"
 
   -- actors functions
   local function_factory={
@@ -1570,7 +1561,7 @@ function unpack_actors()
           -- handle "fist" (eg weapon without ammotype)
           if(ammotype) newqty=inventory[ammotype]-item.ammouse
           if newqty>=0 then
-            if(ammotype) inventory[ammotype]=newqty
+            if(ammotype) inventory[ammotype]=newqty _ammoused+=item.ammouse
             -- play attack sound
             if(item.attacksound) sfx(item.attacksound)
             -- drag?
@@ -1647,7 +1638,7 @@ function unpack_actors()
           elseif ttl>0 then
             ttl-=1
             -- zigzag toward target
-            local nx,ny,dir=n[1]*0.5,n[2]*0.5,rnd{1,-1}
+            local nx,ny,dir=n[1]>>1,n[2]>>1,rnd{1,-1}
             local mx,my=ny*dir+nx,nx*-dir+ny
             local target_angle=atan2(mx,-my)
             self.angle=lerp(shortest_angle(target_angle,self.angle),target_angle,0.5)
@@ -1706,7 +1697,7 @@ function unpack_actors()
   -- float
   -- dropoff
   -- dontfall
-  local all_flags=split("0x1,is_solid,0x2,is_shootable,0x4,is_missile,0x8,is_monster,0x10,is_nogravity,0x20,floating,0x40,is_dropoff,0x80,is_dontfall,0x100,randomize,0x200,countkill,0x400,nosectordmg,0x800,noblood",",",1)
+  local all_flags=split"0x1,is_solid,0x2,is_shootable,0x4,is_missile,0x8,is_monster,0x10,is_nogravity,0x20,floating,0x40,is_dropoff,0x80,is_dontfall,0x100,randomize,0x200,countkill,0x400,nosectordmg,0x800,noblood"
   unpack_array(function()
     local kind,id,state_labels,states,weapons,active_slot,inventory=unpack_variant(),unpack_variant(),{},{},{}
 
@@ -1847,7 +1838,7 @@ function unpack_actors()
       local ctrl,cmd=flags&0x3,{jmp=-1}
       if ctrl==2 then
         -- loop or goto label id   
-        cmd={jmp=flr(flags>>4)}
+        cmd={jmp=flags\16}
       elseif ctrl==0 then
         -- normal command
         -- todo: use a reference to sprite sides (too many duplicates for complex states)
@@ -1946,7 +1937,7 @@ function unpack_map()
       add(verts,{unpack_fixed(),unpack_fixed()})
     end)
 
-    local all_flags=split("0x1,twosided,0x2,special,0x4,dontpegtop,0x8,playeruse,0x10,playercross,0x20,repeatspecial,0x40,blocking",",",1)
+    local all_flags=split"0x1,twosided,0x2,special,0x4,dontpegtop,0x8,playeruse,0x10,playercross,0x20,repeatspecial,0x40,blocking"
     unpack_array(function()
       local line=add(lines,with_flags({
         -- sides
@@ -2103,12 +2094,12 @@ function unpack_map()
   -- things
   local things={}
   local function unpack_thing()
-    local flags,id,x,y=mpeek(),unpack_variant(),unpack_fixed(),unpack_fixed()
+    local flags,actor,x,y=mpeek(),unpack_ref(_actors),unpack_fixed(),unpack_fixed()
     if flags&(0x10<<(_skill-1))!=0 then
       -- layout must match make_thing
       return add(things,{
         -- link to underlying actor
-        _actors[id],
+        actor,
         -- coordinates
         x,y,
         -- dummy height, extracted from sector

@@ -7,5 +7,10 @@ activity_log.txt
 /cdata
 sdl_controllers.txt
 *.bak
+# ignore standard Python virtual envs
 /.env
 /env
+# ignoring generated carts
+/carts/*_[0-9].p8
+/carts/*_e[0-9].p8
+/carts/*_atlas.lua
