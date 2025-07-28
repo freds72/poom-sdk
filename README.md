@@ -8,6 +8,8 @@ This repository contains everything required to produce a DOOM-like using PICO8,
 * Triggers (opening/closing doors, elevators, light...)
 * Keys
 * Multiple weapons (bullets & projectiles)
+* Sector palettes
+* Vertical texture offsets
 
 Level building and monster logic uses standard DOOM concepts & editors and is fully modable.
 
@@ -37,7 +39,7 @@ ZDoom Wiki (outstanding content folks!)
 3. (optional) Create a Python virtual env:
     ```shell
     python -m venv env
-    sandbox/script/activate
+    env/script/activate
     ```
 4. Install WAD compiler:
     ```shell
@@ -66,7 +68,7 @@ ZDoom Wiki (outstanding content folks!)
       --dump-sprites        Writes all sprites to a single image with their 16x16 tile overlay.
       ```
 
-## Compile & Run Poom
+## Compile & Run Poom (Single Map)
 1. Open a Python command prompt at repo location (e.g. where DECORATE file is)
 2. (optional) Enable Python virtual env
 3. Generate a PICO8 multi-cart game with a sample level in carts folder:
@@ -83,6 +85,18 @@ python -m wad_reader --pico-home d:\pico-8_0.2.0 --carts-path carts --mod-name p
 4. Launch game:
 ```shell
 pico8 -home <path to repo> poom_0.p8
+```
+
+## Compile & Run Poom (All Maps)
+1. Same as above, without the map switch (see ZMAPINFO below on how to declare multiple maps)
+
+```shell
+python -m wad_reader --pico-home <path to PICO8> --carts-path <path to carts folder> --mod-name <mod name>
+```
+Example:
+```shell
+cd poom-sdk
+python -m wad_reader --pico-home d:\pico-8_0.2.0 --carts-path carts --mod-name poom
 ```
 
 # Controls
@@ -125,7 +139,8 @@ The toolkit supports folder-based DOOM archive only.
 Archive structure:
 * :file_folder: maps/ contains levels WAD files
 * :file_folder: graphics/ contains image assets (inc. menu)
-* :page_facing_up: PLAYPAL game palette ramp
+* :page_facing_up: PLAYPAL game colormap
+* :page_facing_up: PLAYPAL_RRGGBB sector colormap (optional)
 * :page_facing_up: PAINPAL pain palette ramp
 * :page_facing_up: DECORATE define actors & behaviors
 * :page_facing_up: TEXTURES defines floor & wall textures
@@ -289,9 +304,50 @@ The game support 2 palettes:
 * Game palette - used to shade textures & things
 * Pain palette - used to fade to red screen when player gets hit
 
+Pico8 can only display 16 colors to be chosen from:
+
+|Number| Hex Color |Name|
+|:------|:----------|:--------|
+|00    | <span style="#000000">&#9724;</span>|black|
+|01    | <span style="#1D2B53">&#9724;</span>|dark blue|
+|02    | <span style="#7E2553">&#9724;</span>|dark purple|
+|03    | <span style="#008751">&#9724;</span>|dark green|
+|04    | <span style="#AB5236">&#9724;</span>|brown|
+|05    | <span style="#5F574F">&#9724;</span>|dark gray|
+|06    | <span style="#C2C3C7">&#9724;</span>|light gray|
+|07    | <span style="#FFF1E8">&#9724;</span>|white|
+|08    | <span style="#FF004D">&#9724;</span>|red|
+|09    | <span style="#FFA300">&#9724;</span>|orange|
+|10    | <span style="#FFFF27">&#9724;</span>|yellow|
+|11    | <span style="#00E756">&#9724;</span>|green|
+|12    | <span style="#29ADFF">&#9724;</span>|blue|
+|13    | <span style="#83769C">&#9724;</span>|indigo|
+|14    | <span style="#FF77A8">&#9724;</span>|pink|
+|15    | <span style="#FFCCAA">&#9724;</span>|peach|
+|128   | <span style="#291814">&#9724;</span>|onyx|
+|129   | <span style="#111D35">&#9724;</span>|midnight|
+|130   | <span style="#422136">&#9724;</span>|plum|
+|131   | <span style="#125359">&#9724;</span>|forest|
+|132   | <span style="#742F29">&#9724;</span>|chocolate|
+|133   | <span style="#49333B">&#9724;</span>|eggplant|
+|134   | <span style="#A28879">&#9724;</span>|beige|
+|135   | <span style="#F3EF7D">&#9724;</span>|lemon|
+|136   | <span style="#BE1250">&#9724;</span>|burgundy|
+|137   | <span style="#FF6C24">&#9724;</span>|pumpkin|
+|138   | <span style="#A8E72E">&#9724;</span>|lime|
+|139   | <span style="#00B543">&#9724;</span>|jade|
+|140   | <span style="#065AB5">&#9724;</span>|royal|
+|141   | <span style="#754665">&#9724;</span>|mauve|
+|142   | <span style="#FF6E59">&#9724;</span>|coral|
+|143   | <span style="#FF9D81">&#9724;</span>|salmon|
+
 ### Game Palette
 
 Must be a 16x16 image using *only* colors from row 0 of pain palette.
+
+Colors are sorted top down (color 0 on row 0, color 1 on row 1...), each row is a color ramp.
+
+Each color ramp goes from dark to bright, left to right.
 
 Default palette:
 

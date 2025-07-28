@@ -54,24 +54,60 @@ function btnp(b)
   return _btnp(b,0) or _btnp(b,1) 
 end
 
+function unpack_lzs(str,addr,len)
+	local mem=1
+	local function read()
+		local b=ord(str[mem])
+		mem+=1
+		return b
+	end
+
+	local src,mask=read(),1
+	local function get1()		
+	  local r=(src&mask)!=0 and 1 or 0
+    mask<<=1
+    if(mask>0x80) src=read() mask=1
+    return r
+	end
+	local function getn(n)
+	  local r=0
+    for i=1,n do
+		  r=get1()|r<<1
+		end
+    return r
+	end
+	local o,l,m=getn(4),getn(4),getn(2)
+	local n=0
+	while n<len do
+		-- fetch more data
+		if get1()==0 then
+      poke(addr,getn(8))
+      addr+=1
+      n+=1			
+		else
+			local offset=getn(o)+1
+			local len=getn(l)+m
+			for k=addr,addr+len-1 do
+				poke(k,@(k-offset))
+		  end
+		  addr+=len
+		  n+=len
+		end	
+	end
+end
+
 -- copy image text to spritesheet/memory
 function unpack_gfx(src)
-  local offset=src.h-128
-  local addr=offset>0 and 0x4e00 or 0x0
-  offset=max(offset)
-  src=src.bytes
-  for i=0,#src-1 do
-    poke(addr,ord(src,i+1))
-    addr+=1
-    if (addr>0x4e00+64*offset-1) addr=0x0
-  end
+  local addr=-min(src.h,128)*64
+  -- spills to spritesheet (for title screen!!)
+  unpack_lzs(src.bytes,addr,src.h*64)
+  return addr
 end
 
 -- assumes unpack_gfx called before
 function draw_gfx(src)
-  local offset=src.h-128
-  memcpy(0x6000,0x4e00,64*offset)
-  spr(0,0,offset,16,16)
+  local h=min(src.h,128)
+  memcpy(0x6000+(128-h)*64,-h*64,h*64)
 end
 
 -- game states
@@ -85,7 +121,8 @@ function next_state(fn,...)
     _draw=d
     -- actually run the update
     u()
-        
+    -- done with setup
+    _update=u
     -- gif capture handling
     if(peek(0x5f81)==1) poke(0x5f81,0) extcmd("video") 
 
@@ -298,12 +335,14 @@ function menu_state()
 
       -- dark menu background
       for i=0,15 do
-        pal(vcol(i),sget(112+i,128-11))
+        pal(vcol(i),sget(112+i,1))
         --pset(i,0,i)
       end
       local height=active_menu.height or 8
       palt(0,false)
-      sspr(12,52,104,15+#active_menu.entries*height,12,64)
+      poke(0x5f54,0x60)
+      sspr(12,52,104,15+#active_menu.entries*height,12,52)
+      poke(0x5f54,0x00)
       pal()
       
       -- title
@@ -313,7 +352,7 @@ function menu_state()
       rectfill(18,76+(active_menu.sel-1)*height,113,75+active_menu.sel*height,vcol(2))
       palt(vcol(0),false)
       palt(vcol(4),true)
-      sspr(anm_ttl\12*10,116,11,12,14,74+(active_menu.sel-1)*height)
+      sspr(anm_ttl\12*10,0,11,12,14,74+(active_menu.sel-1)*height)
       palt()
 
       -- menu items      
@@ -334,7 +373,7 @@ function menu_state()
         printb(hs,28,77+(i-1)*height,i<=active_menu.max and vcol(13) or vcol(3))
       end
       
-      if(mouse_ttl>0) palt(vcol(4),true) sspr(41,116,10,10,mouse_x,mouse_y) palt()
+      if(mouse_ttl>0) palt(vcol(4),true) sspr(41,0,10,10,mouse_x,mouse_y) palt()
 
       pal(title_gfx.pal,1)
     end,
@@ -360,7 +399,7 @@ function fadetoblack_state(...)
       end
     end,
     function()
-      memcpy(0x0,0x6000,127*64)
+      memcpy(0x0,0x6000,128*64)
       memcpy(0x5f10,0x4400,16)
     end
 end
@@ -510,10 +549,13 @@ function credits_state(skill,id,level_time,kills,monsters,secrets,all_secrets)
 end
 
 function slicefade_state(...)
-  local args,ttl,r,h,rr=pack(...),30,{},{},0
-  for i=0,127 do
-    rr=lerp(rr,rnd(0.2),0.1)
-    r[i],h[i]=0.05+rr,0
+  local args,ttl,r,h=pack(...),60,{},{}
+  local addr
+  r[0]=rnd(16)
+  h[0]=0
+  for i=1,127 do
+    r[i]=mid((rnd(2)-1)+r[i-1],0.5,16)
+    h[i]=0
   end
   return 
     -- update
@@ -525,26 +567,27 @@ function slicefade_state(...)
     end,
     -- draw
     function()
-      local src,mem=loading_gfx.bytes,0x6000
-      for i=0,#src-1 do
-        poke(mem+i,ord(src,i+1))
-      end
-
+      memcpy(0x6000,addr,loading_gfx.h*64)
       for i,r in pairs(r) do
-        h[i]=lerp(h[i],129,r)
+        h[i]+=r/4+h[i]/16
         sspr(i,0,1,128,i,h[i],1,128)
       end
       pal(loading_gfx.pal,1)
     end,
     -- init
     function()
+      addr=unpack_gfx(loading_gfx)
       -- copy screen to spritesheet
       memcpy(0x0,0x6000,8192)
     end
 end
 
-function switch_scheme(scheme)
+function switch_scheme(scheme)  
   local s=schemes[scheme+1]
+  if not s then 
+    printh("corrupted storage!")
+    return 
+  end
   -- save scheme
   dset(34,scheme)
   dset(35,s.btnfire)
@@ -631,5 +674,5 @@ end
 
 -- color lookup from title image
 function vcol(c)
-  return sget(112+c,128-12)
+  return sget(112+c,0)
 end
